@@ -1,0 +1,1 @@
+Algorithmes servant à traiter les données résultantes et à en tirer des quantités d'intérêt.
