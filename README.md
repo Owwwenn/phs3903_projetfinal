@@ -1,2 +1,7 @@
 # Projet Final PHS3903
-L.kjdn,aizsnkcbiHoc b
+
+Le projet consiste à ...
+
+## À FAIRE
+
+- [ ] Faire le "à faire"
