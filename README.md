@@ -25,15 +25,13 @@ Les noms seront à changer
 - SPC/E
     - Calculs de potentiels/gradients
 
----
-### Est-ce qu'il faudrait pas mettre Thermostat et intégrateur temporel ensemble? À la fin c'est les équations du mouvement qu'on code?
----
-
 ### Thermostat:
 - Nosé-Hoover
+- Définit les matrices des équations du mouvement que Verlet utilise (à vérifier)
 
 ### Intégrateur temporel
 - Verlet
+- Résolution des équations du mouvement à un pas de temps (à vérifier)
 
 ### Calculs
 - Température
@@ -45,15 +43,27 @@ Les noms seront à changer
 ### Interface graphique
 - Affichage des molécules selon l'état du système
 
+# ÉCHÉANCIER
 ## Semaine 9 (09/03 - 15/03):
 ### (11/03) RAPPORT INTERIMAIRE
-
+- Construire l'infrastrucutre de simu
+- Modèle de l'eau à implémenter (2 semaines)
+- Nosé-Hoover à implémenter (2-3 semaines)
+- Interface graphique à implémenter (1-2 semaines)
 
 ## Semaine 10 (16/03 - 22/03):
+- Modèle de l'eau implémenté 
+- Interface graphique complétée
+- Verlet à implémenter (1 semaine)
+- Conception d'un notebook de test?
 
 ## Semaine 11 (23/03 - 29/03):
+-  
+
 
 ## Semaine 12 (30/03 - 05/04):
+- Infrastrucutre de simu complétée (optimiste)
+- Tests de caractérisation
 
 ## Semaine 13 (06/04 - 12/04):
 ### Optimisation
