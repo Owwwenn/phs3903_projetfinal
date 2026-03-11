@@ -58,12 +58,15 @@ Les noms seront à changer
 - Conception d'un notebook de test?
 
 ## Semaine 11 (23/03 - 29/03):
--  
-
+- Commencer à implémenter les tests de caractérisation
+  - Capacité calorifique
+  - Densité
+  - Courbe P-T coexistence
 
 ## Semaine 12 (30/03 - 05/04):
 - Infrastrucutre de simu complétée (optimiste)
-- Tests de caractérisation
+- Implémenter le 2D
+- Test + Résultats
 
 ## Semaine 13 (06/04 - 12/04):
 ### Optimisation
@@ -73,8 +76,16 @@ Les noms seront à changer
 - Ajout d'autres modèles d'eau (TIP4P/2005)
 - Ajout d'autres thermostats
 
+Commencer à préparer la présentation pour orale.
 ## Semaine 14 (13/04 - 19/04):
 ### (16/04) CAHIER DE PROJET
 ### (16/04) EVALUATION PAR LES PAIRS
-### (19/04) DIAPOSITIVES PRESENTATION ORALE 
-## Semiane 15 (20/04 - 26/04):
+### (19/04) DIAPOSITIVES PRESENTATION ORALE
+Commencer rédaction du rapport final
+
+## Semaine 15 (20/04 - 26/04):
+### (20/04) (21/04) PRESENTATION ORALE
+
+## Semaine 16 (27/04 - 03/05):
+## Semaine 17 (04/05 - 10/05):
+### (06/05) REMISE RAPPORT FINAL 
