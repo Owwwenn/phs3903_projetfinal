@@ -27,38 +27,43 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
 
     list_r = v[:3*n].reshape(3,-1).T
     list_q = v[6*n:7*n]
-    L = np.array(Lx,Ly,Lz)
+    L = np.array([Lx,Ly,Lz])
 
     s = np.sin(theta/2)
     c = np.cos(theta/2)
  
-    for i, mol1 in enumerate(nbr_list):
-        for j, mol2 in enumerate(mol1):
-            if mol2:
-                # Définition de r et de q relatifs
-                ri = list_r[j] - list_r[i]             
-                r = ri - np.dot(L, np.round(np.dot(ri, 1/L)))
-                q = qtn.from_float_array(list_q[i]).conjugate() * qtn.from_float_array(list_q[j]) 
+    # Définition des positions des sites hydrogènes dans le repère de la molécule
+    r_h1 = r_oh * np.array([0,s,c])  
+    r_h2 = r_oh * np.array([0,-s,c])  
 
-                # Définition des positions des sites hydrogènes dans le repère de la molécule
-                r_h1 = r_oh * np.array([0,s,c])  
-                r_h2 = r_oh * np.array([0,-s,c])  
+    i_idx, j_idx = np.where(nbr_list)
 
-                # Définition des vecteurs dans le repère monde
-                u_h1 = qtn.rotate_vectors(q, r_h1) 
-                u_h2 = qtn.rotate_vectors(q, r_h2) 
+    # Définition de r et de q relatifs
+    ri = list_r[j_idx] - list_r[i_idx]             
+    r = ri - L * np.round(ri / L)
+    q_i = qtn.from_float_array(list_q[i_idx])
+    q_j = qtn.from_float_array(list_q[j_idx])
+    q = q_i.conjugate() * q_j
 
-                # Calcul des inverses des distances
-                M_OO[i, j] = 1 / np.sqrt(r @ r)
-                M_OH1[i, j] = 1 / np.sqrt((r + u_h1) @ (r + u_h1))
-                M_OH2[i, j] = 1 / np.sqrt((r + u_h2) @ (r + u_h2))
-                M_H1O[i, j] = 1 / np.sqrt((r - r_h1) @ (r - r_h1))
-                M_H1H1[i, j] = 1 / np.sqrt((r - r_h1 + u_h1) @ (r - r_h1 + u_h1))
-                M_H1H2[i, j] = 1 / np.sqrt((r - r_h1 + u_h2) @ (r - r_h1 + u_h2))
-                M_H2O[i, j] = 1 / np.sqrt((r - r_h2) @ (r - r_h2))
-                M_H2H1[i, j] = 1 / np.sqrt((r - r_h2 + u_h1) @ (r - r_h2 + u_h1))
-                M_H2H2[i, j] = 1 / np.sqrt((r - r_h2 + u_h2) @ (r - r_h2 + u_h2))
-    
+    # Définition des vecteurs dans le repère monde
+    u_h1 = qtn.rotate_vectors(q, r_h1) 
+    u_h2 = qtn.rotate_vectors(q, r_h2) 
+
+    # Définition de la fonction pour le calcul d'inverse des normes
+    def inv_norm(v):
+        return 1.0 / np.sqrt(np.einsum('ij,ij->i', v, v)) 
+
+    # Calcul des inverses des distances
+    M_OO[i_idx, j_idx] = inv_norm(r)
+    M_OH1[i_idx, j_idx] = inv_norm(r + u_h1)
+    M_OH2[i_idx, j_idx] = inv_norm(r + u_h2)
+    M_H1O[i_idx, j_idx] = inv_norm(r - r_h1)
+    M_H1H1[i_idx, j_idx] = inv_norm(r - r_h1 + u_h1)
+    M_H1H2[i_idx, j_idx] = inv_norm(r - r_h1 + u_h2)
+    M_H2O[i_idx, j_idx] = inv_norm(r - r_h2)
+    M_H2H1[i_idx, j_idx] = inv_norm(r - r_h2 + u_h1)
+    M_H2H2[i_idx, j_idx] = inv_norm(r - r_h2 + u_h2)
+
     return [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]
 
 """
