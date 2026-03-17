@@ -11,6 +11,8 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
         Ly (float): Taille de la boîte de simulation en y
         Lz (float): Taille de la boîte de simulation en z
         nbr_list (_type_): Liste de booléens des voisins pour chaque molécule
+        theta (float): Angle H-O-H du modèle de la molécule d'eau
+        r_oh (float): Distance O-H du modèle de la molécule d'eau
 
     Returns:
         [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]: 9 matrices de taille nxn qui donnent les inverses des distances entre chaque site.
