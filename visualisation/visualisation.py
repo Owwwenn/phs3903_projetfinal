@@ -9,8 +9,16 @@ def water_mesh(theta, r_oh):
     O = pv.Sphere(radius=0.3, center=(0,0,0))
     H1 = pv.Sphere(radius=0.15, center=(0,r_oh*s,r_oh*c))
     H2 = pv.Sphere(radius=0.15, center=(0,-r_oh*s,r_oh*c))
+    bond1 = pv.Line((0,0,0), (0,r_oh*s,r_oh*c))
+    bond2 = pv.Line((0,0,0), (0,-r_oh*s,r_oh*c))
 
-    water = O + H1 + H2
+    O["rgb"]  = np.tile(np.array([255, 0, 0], dtype=np.uint8),   (O.n_points, 1))
+    H1["rgb"] = np.tile(np.array([255, 255, 255], dtype=np.uint8), (H1.n_points, 1))
+    H2["rgb"] = np.tile(np.array([255, 255, 255], dtype=np.uint8), (H2.n_points, 1))
+    bond1["rgb"] = np.tile(np.array([50, 50, 50], dtype=np.uint8), (bond1.n_points,1))
+    bond2["rgb"] = np.tile(np.array([50, 50, 50], dtype=np.uint8), (bond2.n_points,1))
+
+    water = O.merge(H1).merge(H2).merge(bond1).merge(bond2)
     
     return water 
 
@@ -28,12 +36,12 @@ def show_plot(n: int, v, Lx:float, Ly:float, Lz:float, theta:float, r_oh:float):
         r_oh (float): Distance O-H du modèle de la molécule d'eau
     """    
     list_r = v[:3*n].reshape(3,-1).T
-    list_q = v[6*n:7*n]
+    list_q = v[6*n:10*n].reshape(n,4)
     water = water_mesh(theta, r_oh)
     box = pv.Box(bounds=(-Lx/2, Lx/2, -Ly/2, Ly/2, -Lz/2, Lz/2)) 
 
     plotter = pv.Plotter()
-    plotter.add_mesh(box, style = 'wireframe', color = 'white')    
+    plotter.add_mesh(box, style = 'wireframe', color = 'black')    
 
     for i in range(n):
         pos = list_r[i]
@@ -45,8 +53,8 @@ def show_plot(n: int, v, Lx:float, Ly:float, Lz:float, theta:float, r_oh:float):
         T[:3, 3] = pos
 
         mol = water.copy()
-        mol.transform(T)
+        mol.transform(T, inplace = True)
 
-        plotter.add_mesh(mol)
+        plotter.add_mesh(mol, scalars="rgb", rgb=True, line_width=5)
     
     plotter.show()
