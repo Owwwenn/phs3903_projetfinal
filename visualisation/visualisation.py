@@ -22,6 +22,13 @@ def water_mesh(theta, r_oh):
     
     return water 
 
+def make_transforms(n, r, R):
+    T = np.zeros((n, 4, 4), dtype=float)
+    T[:, :3, :3] = R 
+    T[:, :3, 3] = r
+    T[:, 3, 3] = 1.0
+    return T
+
 # Changer nom plus tard
 def show_plot(n: int, v, Lx:float, Ly:float, Lz:float, theta:float, r_oh:float):
     """Crée un plot pyvista du système pour une position donnée et modèle d'eau donné (ici juste 3 sites à modifier plus tard si on change)
@@ -35,26 +42,23 @@ def show_plot(n: int, v, Lx:float, Ly:float, Lz:float, theta:float, r_oh:float):
         theta (float): Angle H-O-H du modèle de la molécule d'eau
         r_oh (float): Distance O-H du modèle de la molécule d'eau
     """    
-    list_r = v[:3*n].reshape(3,-1).T
-    list_q = v[6*n:10*n].reshape(n,4)
+    r = v[:3*n].reshape(3,-1).T
+    q = v[6*n:10*n].reshape(n,4)
+    R = Rotation.from_quat(q).as_matrix()
+    T = make_transforms(n, r, R)
+
     water = water_mesh(theta, r_oh)
     box = pv.Box(bounds=(-Lx/2, Lx/2, -Ly/2, Ly/2, -Lz/2, Lz/2)) 
 
     plotter = pv.Plotter()
     plotter.add_mesh(box, style = 'wireframe', color = 'black')    
-
-    for i in range(n):
-        pos = list_r[i]
-        quat = list_q[i]
-        R = Rotation.from_quat(quat).as_matrix()
-
-        T = np.eye(4)
-        T[:3,:3] = R
-        T[:3, 3] = pos
-
-        mol = water.copy()
-        mol.transform(T, inplace = True)
-
-        plotter.add_mesh(mol, scalars="rgb", rgb=True, line_width=5)
     
+    meshes = []
+    for i in range(n):
+        mol = water.copy(deep = False)
+        mol.transform(T[i], inplace = True)
+        meshes.append(mol)
+    merged_mesh = meshes[0].merge(meshes[1:])
+
+    plotter.add_mesh(merged_mesh, scalars="rgb", rgb=True, line_width=5)
     plotter.show()
