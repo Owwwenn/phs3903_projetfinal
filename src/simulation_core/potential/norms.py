@@ -28,7 +28,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     M_H2H2 = np.zeros((n,n))
 
     list_r = v[:3*n].reshape(3,-1).T
-    list_q = v[6*n:10*n].reshape(n,4) # changer pour arriver à convention numpy`
+    list_q = v[6*n:10*n].reshape(n,4)[:, [3,0,1,2]] 
     L = np.array([Lx,Ly,Lz])
 
     s = np.sin(theta/2)
@@ -70,5 +70,5 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
 
 """
 TODO
-- Passer par une matrice triangulaire -> ajouter sa transposée comme la matrice est symétrique
+- Passer par une matrice triangulaire -> ajouter sa transposée (comme la matrice est symétrique)
 """

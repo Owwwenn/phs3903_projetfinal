@@ -1,4 +1,4 @@
-from norms import build_inv_norm_matrix
+from simulation_core.potential.norms import build_inv_norm_matrix
 import numpy as np
 
 def build_potential_vector(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float):
