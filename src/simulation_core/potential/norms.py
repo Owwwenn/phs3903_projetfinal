@@ -28,7 +28,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     M_H2H2 = np.zeros((n,n))
 
     list_r = v[:3*n].reshape(3,-1).T
-    list_q = v[6*n:7*n]
+    list_q = v[6*n:10*n].reshape(n,4)
     L = np.array([Lx,Ly,Lz])
 
     s = np.sin(theta/2)
