@@ -15,6 +15,9 @@ class molecule():
 
 mmass = 18.015 #masse molaire eau 
 
+
+
+
 def initialize_molecules(N, L):
      
     
@@ -24,6 +27,7 @@ def initialize_molecules(N, L):
      #initialisation des vitesses:
      kB = 0.831446
      std_div = np.sqrt(kB * 273 / mmass)
+     
      
      #initialisation des positions:
      positions = []

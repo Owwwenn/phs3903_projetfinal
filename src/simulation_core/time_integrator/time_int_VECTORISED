@@ -1,0 +1,212 @@
+from dataclasses import dataclass, field
+import numpy as np
+from scipy.spatial.transform import Rotation
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+mmass = 18.015          # g/mol
+kB    = 0.831446        # (g/mol)(Å/ps)²/K
+T_init = 273            # K
+
+# SPC/E geometry in body frame
+OH_BOND   = 1.0         # Å
+HOH_ANGLE = 109.47      # degrees
+O_body    = np.array([0.0, 0.0, 0.0])
+angle_rad = np.radians(HOH_ANGLE / 2)
+H1_body   = np.array([ np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
+H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
+
+# Principal moments of inertia for SPC/E water (g/mol * Å²)
+I_body = np.array([1.3743, 1.9144, 0.6001])
+i1, i2, i3 = I_body
+
+# =============================================================================
+# SYSTEM CLASS
+# =============================================================================
+class MDSystem:
+    def __init__(self, N):
+        self.N       = N
+        self.cm_pos  = np.zeros((N, 3))   # center of mass positions
+        self.cm_vel  = np.zeros((N, 3))   # center of mass velocities
+        self.force   = np.zeros((N, 3))   # forces on COM
+        self.L       = np.zeros((N, 3))   # angular momentum in body frame
+        self.T       = np.zeros((N, 3))   # torque in lab frame
+        self.quat    = np.zeros((N, 4))   # quaternion (w, x, y, z)
+        self.quat[:, 0] = 1.0             # identity quaternion for all
+
+# =============================================================================
+# INITIALIZATION
+# =============================================================================
+def initialize_system(N, L):
+    sys = MDSystem(N)
+
+    # positions on cubic grid
+    n_side = int(np.ceil(N**(1/3)))
+    d = L / n_side
+    positions = []
+    for i in range(n_side):
+        for j in range(n_side):
+            for k in range(n_side):
+                positions.append([i*d, j*d, k*d])
+    sys.cm_pos = np.array(positions[:N])
+
+    # random velocities from Maxwell-Boltzmann
+    std_dev = np.sqrt(kB * T_init / mmass)
+    sys.cm_vel = np.random.normal(0, std_dev, size=(N, 3))
+
+    # remove center of mass drift
+    sys.cm_vel -= sys.cm_vel.mean(axis=0)
+
+    return sys
+
+# =============================================================================
+# GEOMETRY
+# =============================================================================
+def get_atom_positions(sys):
+    O_lab  = np.zeros((sys.N, 3))
+    H1_lab = np.zeros((sys.N, 3))
+    H2_lab = np.zeros((sys.N, 3))
+
+    for n in range(sys.N):
+        w, x, y, z = sys.quat[n]
+        R = Rotation.from_quat([x, y, z, w]).as_matrix()
+        O_lab[n]  = sys.cm_pos[n] + R @ O_body
+        H1_lab[n] = sys.cm_pos[n] + R @ H1_body
+        H2_lab[n] = sys.cm_pos[n] + R @ H2_body
+
+    return O_lab, H1_lab, H2_lab
+
+# =============================================================================
+# FORCE AND TORQUE STUBS
+# =============================================================================
+def compute_forces(sys):
+    sys.force = np.zeros((sys.N, 3))
+
+def compute_torques(sys):
+    sys.T = np.zeros((sys.N, 3))
+
+# =============================================================================
+# TRANSLATIONAL INTEGRATOR
+# =============================================================================
+def half_step_velocity(sys, dt):
+    sys.cm_vel += 0.5 * (sys.force / mmass) * dt
+
+def full_step_position(sys, dt):
+    sys.cm_pos += sys.cm_vel * dt
+
+def half_step_velocity_final(sys, dt):
+    sys.cm_vel += 0.5 * (sys.force / mmass) * dt
+
+# =============================================================================
+# ROTATIONAL INTEGRATOR
+# =============================================================================
+def E_matrix(omega):
+    w1, w2, w3 = omega
+    return np.array([
+        [ 0,  -w1, -w2, -w3],
+        [ w1,   0,  w3, -w2],
+        [ w2, -w3,   0,  w1],
+        [ w3,  w2, -w1,   0]
+    ])
+
+def half_step_L(sys, dt):
+    for n in range(sys.N):
+        # convert torque from lab to body frame
+        w, x, y, z = sys.quat[n]
+        R = Rotation.from_quat([x, y, z, w]).as_matrix()
+        T_body = R.T @ sys.T[n]
+
+        # step 3: half step torque
+        sys.L[n] += 0.5 * dt * T_body
+
+        # step 4: Ry rotation
+        alpha = (dt / 2) * (1/i3 - 1/i2) * sys.L[n, 1]
+        Ry = np.array([
+            [ np.cos(alpha), 0, np.sin(alpha)],
+            [ 0,             1, 0            ],
+            [-np.sin(alpha), 0, np.cos(alpha)]
+        ])
+        sys.L[n] = Ry @ sys.L[n]
+
+        # step 5: Rx rotation
+        beta = (dt / 2) * (1/i3 - 1/i1) * sys.L[n, 0]
+        Rx = np.array([
+            [1, 0,             0            ],
+            [0,  np.cos(beta), -np.sin(beta)],
+            [0,  np.sin(beta),  np.cos(beta)]
+        ])
+        sys.L[n] = Rx @ sys.L[n]
+
+def get_quat(sys, dt):
+    for n in range(sys.N):
+        omega_b = sys.L[n] / I_body
+        E = E_matrix(omega_b)
+        sys.quat[n] += dt * 0.5 * E @ sys.quat[n]
+        sys.quat[n] /= np.linalg.norm(sys.quat[n])
+
+def half_step_L_final(sys, dt):
+    for n in range(sys.N):
+        # convert torque from lab to body frame
+        w, x, y, z = sys.quat[n]
+        R = Rotation.from_quat([x, y, z, w]).as_matrix()
+        T_body = R.T @ sys.T[n]
+
+        # step 2: Rx rotation first (reversed order)
+        beta = (dt / 2) * (1/i3 - 1/i1) * sys.L[n, 0]
+        Rx = np.array([
+            [1, 0,             0            ],
+            [0,  np.cos(beta), -np.sin(beta)],
+            [0,  np.sin(beta),  np.cos(beta)]
+        ])
+        sys.L[n] = Rx @ sys.L[n]
+
+        # step 3: Ry rotation
+        alpha = (dt / 2) * (1/i3 - 1/i2) * sys.L[n, 1]
+        Ry = np.array([
+            [ np.cos(alpha), 0, np.sin(alpha)],
+            [ 0,             1, 0            ],
+            [-np.sin(alpha), 0, np.cos(alpha)]
+        ])
+        sys.L[n] = Ry @ sys.L[n]
+
+        # step 4: second half step torque
+        sys.L[n] += 0.5 * dt * T_body
+
+# =============================================================================
+# ENERGY
+# =============================================================================
+def kinetic_energy(sys):
+    return 0.5 * mmass * np.sum(sys.cm_vel**2)
+
+def rotational_energy(sys):
+    return 0.5 * np.sum((sys.L**2) / I_body)
+
+# =============================================================================
+# MAIN
+# =============================================================================
+N  = 10
+L  = 30.0
+dt = 0.001
+n_steps = 100
+
+sys = initialize_system(N, L)
+sys.cm_vel[0] = np.array([1.0, 0.0, 0.0])
+sys.L[0]      = np.array([0.0, 0.0, 1.0])
+
+compute_forces(sys)
+compute_torques(sys)
+
+for step in range(n_steps):
+    half_step_velocity(sys, dt)
+    half_step_L(sys, dt)
+    full_step_position(sys, dt)
+    get_quat(sys, dt)
+    compute_forces(sys)
+    compute_torques(sys)
+    half_step_velocity_final(sys, dt)
+    half_step_L_final(sys, dt)
+
+    KE = kinetic_energy(sys)
+    RE = rotational_energy(sys)
+    print(f"step {step:4d}: KE = {KE:.6f}  RE = {RE:.6f}  |q| = {np.linalg.norm(sys.quat[0]):.15f}")
