@@ -2,7 +2,7 @@ import numpy as np
 import quaternion as qtn
 
 def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float):
-    """Construit les matrices de normes entre les différentes sites des molécules de l'eau.
+    """Construit les matrices de normes entre les différentes sites des molécules de l'eau. Ainsi que leurs gradients.
 
     Args:
         n (int): Nombre de molécules
@@ -15,7 +15,8 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
         r_oh (float): Distance O-H du modèle de la molécule d'eau
 
     Returns:
-        [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]: 9 matrices de taille nxn qui donnent les inverses des distances entre chaque site.
+        [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]: liste de 9 matrices de taille (n, n) qui donnent les inverses des distances entre chaque site.
+        [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2] liste de 9 tenseurs d'ordre 3 de taille (n, n, 7) contenant les gradients: Nabla rij pour chaque paire.
     """ 
     M_OO = np.zeros((n,n))
     M_OH1 = np.zeros((n,n))
@@ -56,17 +57,111 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
         return 1.0 / np.sqrt(np.einsum('ij,ij->i', v, v)) 
 
     # Calcul des inverses des distances
-    M_OO[i_idx, j_idx] = inv_norm(r)
-    M_OH1[i_idx, j_idx] = inv_norm(r + u_h1)
-    M_OH2[i_idx, j_idx] = inv_norm(r + u_h2)
-    M_H1O[i_idx, j_idx] = inv_norm(r - r_h1)
-    M_H1H1[i_idx, j_idx] = inv_norm(r - r_h1 + u_h1)
-    M_H1H2[i_idx, j_idx] = inv_norm(r - r_h1 + u_h2)
-    M_H2O[i_idx, j_idx] = inv_norm(r - r_h2)
-    M_H2H1[i_idx, j_idx] = inv_norm(r - r_h2 + u_h1)
-    M_H2H2[i_idx, j_idx] = inv_norm(r - r_h2 + u_h2)
+    inv_rOO = inv_norm(r)
+    inv_rOH1 = inv_norm(r + u_h1)
+    inv_rOH2 = inv_norm(r + u_h2)
+    inv_rH1O = inv_norm(r - r_h1)
+    inv_rH1H1 = inv_norm(r - r_h1 + u_h1)
+    inv_rH1H2 = inv_norm(r - r_h1 + u_h2)
+    inv_rH2O = inv_norm(r - r_h2)
+    inv_rH2H1 = inv_norm(r - r_h2 + u_h1)
+    inv_rH2H2 = inv_norm(r - r_h2 + u_h2)
 
-    return [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]
+    # Matrices d'inverses
+    M_OO[i_idx, j_idx] = inv_rOO
+    M_OH1[i_idx, j_idx] = inv_rOH1
+    M_OH2[i_idx, j_idx] = inv_rOH2
+    M_H1O[i_idx, j_idx] = inv_rH1O
+    M_H1H1[i_idx, j_idx] = inv_rH1H1
+    M_H1H2[i_idx, j_idx] = inv_rH1H2
+    M_H2O[i_idx, j_idx] = inv_rH2O
+    M_H2H1[i_idx, j_idx] = inv_rH2H1
+    M_H2H2[i_idx, j_idx] = inv_rH2H2
+
+    # Définition des vecteurs d'intérêt pour le calcul des gradients 
+    x = r[:, 0]; y = r[:, 1]; z = r[:, 2]
+    w = q[:, 0]; a = q[:, 1]; b = q[:, 2]; c = q[:, 3]
+     
+    # Calcul des gradients
+    ## Interaction O-O
+    dM_OO = np.zeros((n, n, 7))
+    dM_OO[i_idx, j_idx, 0] = x * inv_rOO
+    dM_OO[i_idx, j_idx, 1] = y * inv_rOO
+    dM_OO[i_idx, j_idx, 2] = z * inv_rOO
+   
+    ## Interaction O-H1
+    dM_OH1 = np.zeros((n, n, 7))
+    dM_OH1[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 + b*s) + 2*b*c*r_oh*w - 2*c*r_oh*s*w + x) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 1] = (2*c*r_oh*(b*c - a*w) - r_oh*s*(a**2 - b**2 + c**2 - w**2) + y) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 2] = (2*r_oh*s*(b*c + a*w) + c*r_oh*(-a**2 - b**2 + c**2 + w**2) + z) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + c**2*r_oh*s**2*w + a**2*r_oh*(c**2 + s**2)*w + b**2*r_oh*(c**2 + s**2)*w + c**2*r_oh*w**3 + r_oh*s**2*w**3 + b*c*x - c*s*x + s*w*y + c*w*z + a*(-(c*y) + s*z))) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x + b*s*x - c*w*y + s*w*z + a*(c**4*r_oh + b**2*r_oh*(c**2 + s**2) + c**2*r_oh*(s**2 + w**2) + s*(r_oh*s*w**2 - y) - c*z))) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 5] = (2*r_oh*(a**2*b*r_oh*(c**2 + s**2) + b**3*r_oh*(c**2 + s**2) + a*s*x + b*(c**4*r_oh + c**2*r_oh*(s**2 + w**2) + s*(r_oh*s*w**2 + y) - c*z) + c*(w*x + c*y + s*z))) * inv_rOH1
+    dM_OH1[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*s**2 + a**2*c*r_oh*(c**2 + s**2) + b**2*c*r_oh*(c**2 + s**2) + c**3*r_oh*w**2 + c*r_oh*s**2*w**2 + a*c*x - s*w*x - c*s*y + c**2*z + b*(c*y + s*z))) * inv_rOH1
+
+    ## Interaction O-H2
+    dM_OH2 = np.zeros((n, n, 7))
+    dM_OH2[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 - b*s) + 2*b*c*r_oh*w + 2*c*r_oh*s*w + x) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 1] = (2*c*r_oh*(b*c - a*w) + r_oh*s*(a**2 - b**2 + c**2 - w**2) + y) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 2] = (-2*r_oh*s*(b*c + a*w) + c*r_oh*(-a**2 - b**2 + c**2 + w**2) + z) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + c**2*r_oh*s**2*w + a**2*r_oh*(c**2 + s**2)*w + b**2*r_oh*(c**2 + s**2)*w + c**2*r_oh*w**3 + r_oh*s**2*w**3 + b*c*x + c*s*x - s*w*y + c*w*z - a*(c*y + s*z))) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x - c*w*y + a*(c**4*r_oh + b**2*r_oh*(c**2 + s**2) + c**2*r_oh*(s**2 + w**2) + s*(r_oh*s*w**2 + y) - c*z) - s*(b*x + w*z))) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 5] = (2*r_oh*(a**2*b*r_oh*(c**2 + s**2) + b**3*r_oh*(c**2 + s**2) - a*s*x + b*(c**4*r_oh + c**2*r_oh*(s**2 + w**2) + s*(r_oh*s*w**2 - y) - c*z) + c*(w*x + c*y - s*z))) * inv_rOH2
+    dM_OH2[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*s**2 + a**2*c*r_oh*(c**2 + s**2) + b**2*c*r_oh*(c**2 + s**2) + c**3*r_oh*w**2 + c*r_oh*s**2*w**2 + a*c*x + s*w*x + c*s*y + c**2*z + b*(c*y - s*z))) * inv_rOH2
+
+    ## Interaction H1-O
+    dM_H1O = np.zeros((n,n,7))
+    dM_H1O[i_idx, j_idx, 0] = x * inv_rH1O
+    dM_H1O[i_idx, j_idx, 1] = (-r_oh*s + y) * inv_rH1O
+    dM_H1O[i_idx, j_idx, 2] = (-c*r_oh + z) * inv_rH1O
+
+    ## Interaction H1-H1
+    dM_H1H1 = np.zeros((n,n,7))
+    dM_H1H1[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 + b*s) + 2*b*c*r_oh*w - 2*c*r_oh*s*w + x) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 1] = (2*b*c**2*r_oh + b**2*r_oh*s - r_oh*(2*a*c*w + s*(1 + a**2 + c**2 - w**2)) + y) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 2] = (c**3*r_oh + 2*a*r_oh*s*w - c*r_oh*(1 + a**2 + b**2 - 2*b*s - w**2) + z) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + c**2*r_oh*w*(-1 + a**2 + b**2 + s**2 + w**2) + s*(r_oh*s*w*(-1 + a**2 + b**2 + w**2) + w*y + a*z) + c*(b*x - s*x - a*y + w*z))) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x + b*s*x - c*w*y + s*w*z + a*(c**4*r_oh + c**2*r_oh*(1 + b**2 + s**2 + w**2) + s*(r_oh*s*(1 + b**2 + w**2) - y) - c*z))) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 5] = (2*r_oh*(b**3*r_oh*(c**2 + s**2) + a*s*x + c**2*(-2*r_oh*s + y) + b*(c**4*r_oh + c**2*r_oh*(1 + a**2 + s**2 + w**2) + s*(r_oh*s*(-1 + a**2 + w**2) + y) - c*z) + c*(w*x + s*z))) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*(-1 + a**2 + b**2 + s**2 + w**2) + c*(b**2*r_oh*s**2 + r_oh*s**2*(1 + a**2 + w**2) + a*x - s*y + b*(-2*r_oh*s + y)) + c**2*z + s*(-(w*x) + b*z))) * inv_rH1H1
+
+    ## Interaction H1-H2
+    dM_H1H2 = np.zeros((n,n,7))
+    dM_H1H2[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 - b*s) + 2*b*c*r_oh*w + 2*c*r_oh*s*w + x) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 1] = (2*b*c**2*r_oh - b**2*r_oh*s - 2*a*c*r_oh*w + r_oh*s*(-1 + a**2 + c**2 - w**2) + y) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 2] = (c**3*r_oh - 2*a*r_oh*s*w - c*r_oh*(1 + a**2 + b**2 + 2*b*s - w**2) + z) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + a**2*r_oh*(c**2 + s**2)*w + c**2*r_oh*w*(-1 + b**2 + s**2 + w**2) + s*w*(r_oh*s*(1 + b**2 + w**2) - y) + a*(2*c*r_oh*s - c*y - s*z) + c*(b*x + s*x + w*z))) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x + c*w*(2*r_oh*s - y) + a*(c**4*r_oh + c**2*r_oh*(1 + b**2 + s**2 + w**2) + s*(r_oh*s*(-1 + b**2 + w**2) + y) - c*z) - s*(b*x + w*z))) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 5] = (2*r_oh*(b**3*r_oh*(c**2 + s**2) - a*s*x + b*(c**4*r_oh + c**2*r_oh*(1 + a**2 + s**2 + w**2) + s*(r_oh*s*(1 + a**2 + w**2) - y) - c*z) + c*(w*x + c*y - s*z))) * inv_rH1H2
+    dM_H1H2[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*(-1 + a**2 + b**2 + s**2 + w**2) + c*(r_oh*s**2*(-1 + a**2 + b**2 + w**2) + a*x + (b + s)*y) + c**2*z + s*(w*x - b*z))) * inv_rH1H2
+
+    ## Interaction H2-O
+    dM_H2O = np.zeros((n,n,7))
+    dM_H2O[i_idx, j_idx, 0] = x * inv_rH2O
+    dM_H2O[i_idx, j_idx, 1] = (r_oh*s + y) * inv_rH2O
+    dM_H2O[i_idx, j_idx, 2] = (-c*r_oh + z) * inv_rH2O
+
+    ## Interaction H2-H1
+    dM_H2H1 = np.zeros((n,n,7))
+    dM_H2H1[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 + b*s) + 2*b*c*r_oh*w - 2*c*r_oh*s*w + x) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 1] = (2*b*c**2*r_oh + b**2*r_oh*s - 2*a*c*r_oh*w - r_oh*s*(-1 + a**2 + c**2 - w**2) + y) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 2] = (c**3*r_oh + 2*a*r_oh*s*w - c*r_oh*(1 + a**2 + b**2 - 2*b*s - w**2) + z) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + a**2*r_oh*(c**2 + s**2)*w + c**2*r_oh*w*(-1 + b**2 + s**2 + w**2) + s*w*(r_oh*s*(1 + b**2 + w**2) + y) + a*(-(c*(2*r_oh*s + y)) + s*z) + c*(b*x - s*x + w*z))) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x - c*w*(2*r_oh*s + y) + a*(c**4*r_oh + c**2*r_oh*(1 + b**2 + s**2 + w**2) + s*(r_oh*s*(-1 + b**2 + w**2) - y) - c*z) + s*(b*x + w*z))) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 5] = (2*r_oh*(b**3*r_oh*(c**2 + s**2) + a*s*x + b*(c**4*r_oh + c**2*r_oh*(1 + a**2 + s**2 + w**2) + s*(r_oh*s*(1 + a**2 + w**2) + y) - c*z) + c*(w*x + c*y + s*z))) * inv_rH2H1
+    dM_H2H1[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*(-1 + a**2 + b**2 + s**2 + w**2) + c*(r_oh*s**2*(-1 + a**2 + b**2 + w**2) + a*x + b*y - s*y) + c**2*z + s*(-(w*x) + b*z))) * inv_rH2H1
+
+    ## Interaction H2-H2
+    dM_H2H2 = np.zeros((n,n,7))
+    dM_H2H2[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 - b*s) + 2*b*c*r_oh*w + 2*c*r_oh*s*w + x) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 1] = (r_oh*s + 2*c*r_oh*(b*c - a*w) + r_oh*s*(a**2 - b**2 + c**2 - w**2) + y) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 2] = (c**3*r_oh - 2*a*r_oh*s*w - c*r_oh*(1 + a**2 + b**2 + 2*b*s - w**2) + z) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + c**2*r_oh*w*(-1 + a**2 + b**2 + s**2 + w**2) + s*(r_oh*s*w*(-1 + a**2 + b**2 + w**2) - w*y - a*z) + c*(b*x + s*x - a*y + w*z))) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x - c*w*y + a*(c**4*r_oh + c**2*r_oh*(1 + b**2 + s**2 + w**2) + s*(r_oh*s*(1 + b**2 + w**2) + y) - c*z) - s*(b*x + w*z))) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 5] = (2*r_oh*(b**3*r_oh*(c**2 + s**2) - a*s*x + c**2*(2*r_oh*s + y) + b*(c**4*r_oh + c**2*r_oh*(1 + a**2 + s**2 + w**2) + s*(r_oh*s*(-1 + a**2 + w**2) - y) - c*z) + c*(w*x - s*z))) * inv_rH2H2
+    dM_H2H2[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*(-1 + a**2 + b**2 + s**2 + w**2) + c*(b**2*r_oh*s**2 + r_oh*s**2*(1 + a**2 + w**2) + a*x + s*y + b*(2*r_oh*s + y)) + c**2*z + s*(w*x - b*z))) * inv_rH2H2
+    
+    return [[M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2], [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2]]
 
 """
 TODO
