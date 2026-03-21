@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -68,12 +68,10 @@ def get_atom_positions(sys):
     H1_lab = np.zeros((sys.N, 3))
     H2_lab = np.zeros((sys.N, 3))
 
-    for n in range(sys.N):
-        w, x, y, z = sys.quat[n]
-        R = Rotation.from_quat([x, y, z, w]).as_matrix()
-        O_lab[n]  = sys.cm_pos[n] + R @ O_body
-        H1_lab[n] = sys.cm_pos[n] + R @ H1_body
-        H2_lab[n] = sys.cm_pos[n] + R @ H2_body
+    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
+    O_lab  = sys.cm_pos + R.apply(O_body)
+    H1_lab = sys.cm_pos + R.apply(H1_body)
+    H2_lab = sys.cm_pos + R.apply(H2_body)
 
     return O_lab, H1_lab, H2_lab
 
@@ -101,7 +99,7 @@ def half_step_velocity_final(sys, dt):
 # =============================================================================
 # ROTATIONAL INTEGRATOR
 # =============================================================================
-def E_matrix(omega):
+def A(omega):
     w1, w2, w3 = omega
     return np.array([
         [ 0,  -w1, -w2, -w3],
@@ -111,67 +109,94 @@ def E_matrix(omega):
     ])
 
 def half_step_L(sys, dt):
-    for n in range(sys.N):
-        # convert torque from lab to body frame
-        w, x, y, z = sys.quat[n]
-        R = Rotation.from_quat([x, y, z, w]).as_matrix()
-        T_body = R.T @ sys.T[n]
+    # --- 1. Lab → body frame torque (vectorized) ---
+    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
+    T_body = R.inv().apply(sys.T)
 
-        # step 3: half step torque
-        sys.L[n] += 0.5 * dt * T_body
+    # --- 2. Half-step torque update ---
+    sys.L += 0.5 * dt * T_body
 
-        # step 4: Ry rotation
-        alpha = (dt / 2) * (1/i3 - 1/i2) * sys.L[n, 1]
-        Ry = np.array([
-            [ np.cos(alpha), 0, np.sin(alpha)],
-            [ 0,             1, 0            ],
-            [-np.sin(alpha), 0, np.cos(alpha)]
-        ])
-        sys.L[n] = Ry @ sys.L[n]
+    # --- 3. Ry rotation (around y-axis) ---
+    Lx, Ly, Lz = sys.L.T
 
-        # step 5: Rx rotation
-        beta = (dt / 2) * (1/i3 - 1/i1) * sys.L[n, 0]
-        Rx = np.array([
-            [1, 0,             0            ],
-            [0,  np.cos(beta), -np.sin(beta)],
-            [0,  np.sin(beta),  np.cos(beta)]
-        ])
-        sys.L[n] = Rx @ sys.L[n]
+    alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
+    c = np.cos(alpha)
+    s = np.sin(alpha)
+
+    Lx_new =  c * Lx + s * Lz
+    Ly_new =  Ly
+    Lz_new = -s * Lx + c * Lz
+
+    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
+
+    # --- 4. Rx rotation (around x-axis) ---
+    Lx, Ly, Lz = sys.L.T
+
+    beta = (dt / 2) * (1/i3 - 1/i1) * Lx
+    c = np.cos(beta)
+    s = np.sin(beta)
+
+    Lx_new = Lx
+    Ly_new =  c * Ly - s * Lz
+    Lz_new =  s * Ly + c * Lz
+
+    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
+
 
 def get_quat(sys, dt):
-    for n in range(sys.N):
-        omega_b = sys.L[n] / I_body
-        E = E_matrix(omega_b)
-        sys.quat[n] += dt * 0.5 * E @ sys.quat[n]
-        sys.quat[n] /= np.linalg.norm(sys.quat[n])
+
+   for n in range(sys.N):
+        omega = sys.L[n] / I_body
+        omega_norm = np.linalg.norm(omega)
+
+        if omega_norm > 0:
+            theta = omega_norm * dt
+            axis = omega / omega_norm
+
+            dq = Rotation.from_rotvec(axis * theta).as_quat()  # (x,y,z,w)
+
+            q = sys.quat[n]
+            qR = Rotation.from_quat([q[1], q[2], q[3], q[0]])
+
+            q_new = (Rotation.from_quat(dq) * qR).as_quat()
+
+            sys.quat[n] = np.array([q_new[3], q_new[0], q_new[1], q_new[2]])
+
+
 
 def half_step_L_final(sys, dt):
-    for n in range(sys.N):
-        # convert torque from lab to body frame
-        w, x, y, z = sys.quat[n]
-        R = Rotation.from_quat([x, y, z, w]).as_matrix()
-        T_body = R.T @ sys.T[n]
+    # --- 1. Lab → body frame torque (vectorized) ---
+    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
+    T_body = R.inv().apply(sys.T)
 
-        # step 2: Rx rotation first (reversed order)
-        beta = (dt / 2) * (1/i3 - 1/i1) * sys.L[n, 0]
-        Rx = np.array([
-            [1, 0,             0            ],
-            [0,  np.cos(beta), -np.sin(beta)],
-            [0,  np.sin(beta),  np.cos(beta)]
-        ])
-        sys.L[n] = Rx @ sys.L[n]
+    # --- 2. Rx rotation FIRST (reversed order) ---
+    Lx, Ly, Lz = sys.L.T
 
-        # step 3: Ry rotation
-        alpha = (dt / 2) * (1/i3 - 1/i2) * sys.L[n, 1]
-        Ry = np.array([
-            [ np.cos(alpha), 0, np.sin(alpha)],
-            [ 0,             1, 0            ],
-            [-np.sin(alpha), 0, np.cos(alpha)]
-        ])
-        sys.L[n] = Ry @ sys.L[n]
+    beta = (dt / 2) * (1/i3 - 1/i1) * Lx
+    c = np.cos(beta)
+    s = np.sin(beta)
 
-        # step 4: second half step torque
-        sys.L[n] += 0.5 * dt * T_body
+    Lx_new = Lx
+    Ly_new =  c * Ly - s * Lz
+    Lz_new =  s * Ly + c * Lz
+
+    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
+
+    # --- 3. Ry rotation ---
+    Lx, Ly, Lz = sys.L.T
+
+    alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
+    c = np.cos(alpha)
+    s = np.sin(alpha)
+
+    Lx_new =  c * Lx + s * Lz
+    Ly_new =  Ly
+    Lz_new = -s * Lx + c * Lz
+
+    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
+
+    # --- 4. Second half-step torque ---
+    sys.L += 0.5 * dt * T_body
 
 # =============================================================================
 # ENERGY
