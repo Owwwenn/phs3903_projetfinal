@@ -236,12 +236,12 @@ def half_step_L_final(sys, dt):
 # NEIGHBOUR LIST
 # =============================================================================
 
-def build_nl(r_c, r_s, sys, L):
+def build_nl(r_c, r_s, L):
     rt = r_c + r_s
     cm_pos, _, _ = pbc(L, L, L)
     N = len(cm_pos)
     Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
-    nl = np.full((N, Nmax), 0, dtype=int)  
+    nl = np.full((N, Nmax), -1, dtype=int)  
     counts = np.zeros(N, dtype=int)
 
     for i in range(N):
