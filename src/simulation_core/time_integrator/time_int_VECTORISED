@@ -34,6 +34,9 @@ class MDSystem:
         self.T       = np.zeros((N, 3))   # torque in lab frame
         self.quat    = np.zeros((N, 4))   # quaternion (w, x, y, z)
         self.quat[:, 0] = 1.0             # identity quaternion for all
+        self.r_last = np.zeros((N, 3))
+        self.neighbor_list = None
+        self.neighbor_count = None
 
 # =============================================================================
 # INITIALIZATION
@@ -122,6 +125,7 @@ def half_step_velocity(sys, dt):
 
 def full_step_position(sys, dt):
     sys.cm_pos += sys.cm_vel * dt
+    
 
 def half_step_velocity_final(sys, dt):
     sys.cm_vel += 0.5 * (sys.force / mmass) * dt
@@ -233,12 +237,14 @@ def half_step_L_final(sys, dt):
 # NEIGHBOUR LIST
 # =============================================================================
 
+def def_rebuild(sys, L, skin):
+    disp = sys.cm_pos - sys.r_last
+    disp -= L * np.round(disp / L)
+    max_disp = np.max(np.linalg.norm(disp, axis = 1))
 
-#def neighbour_update(nl, rc, rs): #nl = neighbour list de taille (N, nb max the voisin)
-
-
-
-
+    yes 
+    return max_disp > (skin / 2)
+    
 
 
 
