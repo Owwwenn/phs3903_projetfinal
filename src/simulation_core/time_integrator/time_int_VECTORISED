@@ -37,6 +37,7 @@ class MDSystem:
         self.r_last = np.zeros((N, 3))
         self.neighbor_list = None
         self.neighbor_count = None
+        self.size = np.zeros(3)
 
 # =============================================================================
 # INITIALIZATION
@@ -83,10 +84,8 @@ def get_atom_positions(sys):
 
     return O_lab, H1_lab, H2_lab
 
-def mic(pos_a, pos_b):
-        Dr = pos_a[:, None, :] - pos_b[None, :, :]
-        Dr -= L * np.round(Dr / L)
-        return Dr
+def mic(dr, L):
+       return dr - L * np.round(dr / L)
 
 def pbc(Lx, Ly, Lz):
     L = np.array([Lx, Ly, Lz])
@@ -98,14 +97,14 @@ def pbc(Lx, Ly, Lz):
     pos_h1 -= L * np.round(pos_h1 / L)
     pos_h2 -= L * np.round(pos_h2 / L)
 
-    Dr_o      = mic(pos_o, pos_o)
-    Dr_h1     = mic(pos_h1, pos_h1)
-    Dr_h2     = mic(pos_h2, pos_h2)
-    Dr_o_h1   = mic(pos_o, pos_h1)
-    Dr_o_h2   = mic(pos_o, pos_h2)
-    Dr_h1_h2  = mic(pos_h1, pos_h2)
+    # Dr_o      = mic(pos_o, pos_o)
+    # Dr_h1     = mic(pos_h1, pos_h1)
+    # Dr_h2     = mic(pos_h2, pos_h2)
+    # Dr_o_h1   = mic(pos_o, pos_h1)
+    # Dr_o_h2   = mic(pos_o, pos_h2)
+    # Dr_h1_h2  = mic(pos_h1, pos_h2)
 
-    return pos_o, pos_h1, pos_h2, Dr_o, Dr_h1, Dr_h2, Dr_o_h1, Dr_o_h2, Dr_h1_h2
+    return pos_o, pos_h1, pos_h2,
 
 
 # =============================================================================
@@ -237,12 +236,37 @@ def half_step_L_final(sys, dt):
 # NEIGHBOUR LIST
 # =============================================================================
 
+def build_nl(r_c, r_s, sys, L):
+    rt = r_c + r_s
+    cm_pos, _, _ = pbc(L, L, L)
+    N = len(cm_pos)
+    Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
+    nl = np.full((N, Nmax), 0, dtype=int)  
+    counts = np.zeros(N, dtype=int)
+
+    for i in range(N):
+        for j in range(i+1, N):
+            dr = cm_pos[i] - cm_pos[j]
+            dr = mic(dr, L)
+
+            if np.dot(dr, dr) < rt**2:
+                
+                nl[i, counts[i]] = j
+                counts[i] += 1
+
+                
+                nl[j, counts[j]] = i
+                counts[j] += 1
+
+    return nl, counts
+            
+
 def def_rebuild(sys, L, skin):
     disp = sys.cm_pos - sys.r_last
     disp -= L * np.round(disp / L)
     max_disp = np.max(np.linalg.norm(disp, axis = 1))
 
-    yes 
+
     return max_disp > (skin / 2)
     
 
