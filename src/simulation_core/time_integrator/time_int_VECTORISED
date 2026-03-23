@@ -60,6 +60,11 @@ def initialize_system(N, L):
 
     return sys
 
+
+
+
+
+
 # =============================================================================
 # GEOMETRY
 # =============================================================================
@@ -74,6 +79,31 @@ def get_atom_positions(sys):
     H2_lab = sys.cm_pos + R.apply(H2_body)
 
     return O_lab, H1_lab, H2_lab
+
+def mic(pos_a, pos_b):
+        Dr = pos_a[:, None, :] - pos_b[None, :, :]
+        Dr -= L * np.round(Dr / L)
+        return Dr
+
+def pbc(Lx, Ly, Lz):
+    L = np.array([Lx, Ly, Lz])
+
+    pos_o, pos_h1, pos_h2 = get_atom_positions(sys)
+
+    
+    pos_o  -= L * np.round(pos_o / L)
+    pos_h1 -= L * np.round(pos_h1 / L)
+    pos_h2 -= L * np.round(pos_h2 / L)
+
+    Dr_o      = mic(pos_o, pos_o)
+    Dr_h1     = mic(pos_h1, pos_h1)
+    Dr_h2     = mic(pos_h2, pos_h2)
+    Dr_o_h1   = mic(pos_o, pos_h1)
+    Dr_o_h2   = mic(pos_o, pos_h2)
+    Dr_h1_h2  = mic(pos_h1, pos_h2)
+
+    return pos_o, pos_h1, pos_h2, Dr_o, Dr_h1, Dr_h2, Dr_o_h1, Dr_o_h2, Dr_h1_h2
+
 
 # =============================================================================
 # FORCE AND TORQUE STUBS
@@ -197,6 +227,20 @@ def half_step_L_final(sys, dt):
 
     # --- 4. Second half-step torque ---
     sys.L += 0.5 * dt * T_body
+
+
+# =============================================================================
+# NEIGHBOUR LIST
+# =============================================================================
+
+
+#def neighbour_update(nl, rc, rs): #nl = neighbour list de taille (N, nb max the voisin)
+
+
+
+
+
+
 
 # =============================================================================
 # ENERGY
