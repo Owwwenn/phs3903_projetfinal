@@ -79,9 +79,13 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     M_H2H2[i_idx, j_idx] = inv_rH2H2
 
     # Définition des vecteurs d'intérêt pour le calcul des gradients 
+    q = qtn.as_float_array(q)
     x = r[:, 0]; y = r[:, 1]; z = r[:, 2]
     w = q[:, 0]; a = q[:, 1]; b = q[:, 2]; c = q[:, 3]
-     
+    G = 2*np.array([[-a, w, -c, b],
+                    [-b, c, w, -a],
+                    [-c, -b, a, w]])
+    
     # Calcul des gradients
     ## Interaction O-O
     dM_OO = np.zeros((n, n, 7))
@@ -118,7 +122,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     ## Interaction H1-H1
     dM_H1H1 = np.zeros((n,n,7))
     dM_H1H1[i_idx, j_idx, 0] = (2*a*r_oh*(c**2 + b*s) + 2*b*c*r_oh*w - 2*c*r_oh*s*w + x) * inv_rH1H1
-    dM_H1H1[i_idx, j_idx, 1] = (2*b*c**2*r_oh + b**2*r_oh*s - r_oh*(2*a*c*w + s*(1 + a**2 + c**2 - w**2)) + y) * inv_rH1H1
+    dM_H1H1[i_idx, j_idx, 1] = (2*b*c**2*r_oh + b**3*r_oh*s - r_oh*(2*a*c*w + s*(1 + a**2 + c**2 - w**2)) + y) * inv_rH1H1
     dM_H1H1[i_idx, j_idx, 2] = (c**3*r_oh + 2*a*r_oh*s*w - c*r_oh*(1 + a**2 + b**2 - 2*b*s - w**2) + z) * inv_rH1H1
     dM_H1H1[i_idx, j_idx, 3] = (2*r_oh*(c**4*r_oh*w + c**2*r_oh*w*(-1 + a**2 + b**2 + s**2 + w**2) + s*(r_oh*s*w*(-1 + a**2 + b**2 + w**2) + w*y + a*z) + c*(b*x - s*x - a*y + w*z))) * inv_rH1H1
     dM_H1H1[i_idx, j_idx, 4] = (2*r_oh*(a**3*r_oh*(c**2 + s**2) + c**2*x + b*s*x - c*w*y + s*w*z + a*(c**4*r_oh + c**2*r_oh*(1 + b**2 + s**2 + w**2) + s*(r_oh*s*(1 + b**2 + w**2) - y) - c*z))) * inv_rH1H1
@@ -161,7 +165,27 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     dM_H2H2[i_idx, j_idx, 5] = (2*r_oh*(b**3*r_oh*(c**2 + s**2) - a*s*x + c**2*(2*r_oh*s + y) + b*(c**4*r_oh + c**2*r_oh*(1 + a**2 + s**2 + w**2) + s*(r_oh*s*(-1 + a**2 + w**2) - y) - c*z) + c*(w*x - s*z))) * inv_rH2H2
     dM_H2H2[i_idx, j_idx, 6] = (2*r_oh*(c**5*r_oh + c**3*r_oh*(-1 + a**2 + b**2 + s**2 + w**2) + c*(b**2*r_oh*s**2 + r_oh*s**2*(1 + a**2 + w**2) + a*x + s*y + b*(2*r_oh*s + y)) + c**2*z + s*(w*x - b*z))) * inv_rH2H2
     
-    return [[M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2], [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2]]
+    def to_6dof(dM, G, i_idx, j_idx):
+        """Remplace les 4 colonnes quaternion (3:7) par 3 colonnes torque. s/o Claude"""
+        N = dM.shape[0]
+        dM_new = np.zeros((N, N, 6))
+        dM_new[i_idx, j_idx, :3] = dM[i_idx, j_idx, :3]  # grad position inchangé
+        grad_q = dM[i_idx, j_idx, 3:7]                    # (N_pairs, 4)
+        # G: (3, 4, N_pairs) -> einsum donne (N_pairs, 3)
+        dM_new[i_idx, j_idx, 3:6] = np.einsum('klp,pl->pk', G, grad_q)
+        return dM_new
+
+    dM_OO = to_6dof(dM_OO, G, i_idx, j_idx)
+    dM_OH1 = to_6dof(dM_OH1, G, i_idx, j_idx)
+    dM_OH2 = to_6dof(dM_OH2, G, i_idx, j_idx)
+    dM_H1O = to_6dof(dM_H1O, G, i_idx, j_idx)
+    dM_H1H1 = to_6dof(dM_H1H1, G, i_idx, j_idx)
+    dM_H1H2 = to_6dof(dM_H1H2, G, i_idx, j_idx)
+    dM_H2O = to_6dof(dM_H2O, G, i_idx, j_idx)
+    dM_H2H1 = to_6dof(dM_H2H1, G, i_idx, j_idx)
+    dM_H2H2 = to_6dof(dM_H2H2, G, i_idx, j_idx)
+
+    return [[M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2], [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2], G]
 
 """
 TODO
