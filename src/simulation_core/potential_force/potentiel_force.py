@@ -22,7 +22,7 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     [inv_norm_matrix_list, deriv_matrices]= build_inv_norm_matrix(n, v, Lx, Ly, Lz, nbr_list, theta, r_oh)
     inv_norm_matrix_list = np.array(inv_norm_matrix_list)
     deriv_matrices = np.array(deriv_matrices)
-    left_charge_vector_list = np.array([q_o*np.one  s(n)]*3 + [q_h*np.ones(n)]*6)
+    left_charge_vector_list = np.array([q_o*np.ones(n)]*3 + [q_h*np.ones(n)]*6)
     right_charge_vector_list = np.array(([q_o*np.ones(n)] + [q_h*np.ones(n)]*2) * 3)
 
     U = np.einsum("ki,kij,kj->i", left_charge_vector_list, inv_norm_matrix_list, right_charge_vector_list)
