@@ -28,7 +28,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     M_H2H1 = np.zeros((n,n))
     M_H2H2 = np.zeros((n,n))
 
-    list_r = v[:3*n].reshape(3,-1).T
+    list_r = v[:3*n].reshape(n,3)
     list_q = v[6*n:10*n].reshape(n,4)[:, [3,0,1,2]] 
     L = np.array([Lx,Ly,Lz])
 
