@@ -16,7 +16,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
 
     Returns:
         [M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2]: liste de 9 matrices de taille (n, n) qui donnent les inverses des distances entre chaque site.
-        [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2] liste de 9 tenseurs d'ordre 3 de taille (n, n, 7) contenant les gradients: Nabla rij pour chaque paire.
+        [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2] liste de 9 tenseurs d'ordre 3 de taille (n, n, 6) contenant les gradients positionnels et angulaires (axes x,y,z) dans le repère de la molécule
     """ 
     M_OO = np.zeros((n,n))
     M_OH1 = np.zeros((n,n))
@@ -185,7 +185,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     dM_H2H1 = to_6dof(dM_H2H1, G, i_idx, j_idx)
     dM_H2H2 = to_6dof(dM_H2H2, G, i_idx, j_idx)
 
-    return [[M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2], [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2], G]
+    return [[M_OO, M_OH1, M_OH2, M_H1O, M_H1H1, M_H1H2, M_H2O, M_H2H1, M_H2H2], [dM_OO, dM_OH1, dM_OH2, dM_H1O, dM_H1H1, dM_H1H2, dM_H2O, dM_H2H1, dM_H2H2]]
 
 """
 TODO
