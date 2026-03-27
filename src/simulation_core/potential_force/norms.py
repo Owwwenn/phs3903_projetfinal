@@ -28,7 +28,7 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     M_H2H1 = np.zeros((n,n))
     M_H2H2 = np.zeros((n,n))
 
-    list_r = v[:3*n].reshape(3,-1).T
+    list_r = v[:3*n].reshape(n,3)
     list_q = v[6*n:10*n].reshape(n,4)[:, [3,0,1,2]] 
     L = np.array([Lx,Ly,Lz])
 
@@ -43,12 +43,14 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
 
     # Définition de r et de q relatifs
     ri = list_r[j_idx] - list_r[i_idx]             
-    r = ri - L * np.round(ri / L)
+    rw = ri - L * np.round(ri / L)
     q_i = qtn.from_float_array(list_q[i_idx])
     q_j = qtn.from_float_array(list_q[j_idx])
     q = q_i.conjugate() * q_j
+    # Passage du repère monde au repère de la molécule
+    r = qtn.rotate_vectors(q_i, rw)
 
-    # Définition des vecteurs dans le repère monde
+    # Définition des vecteurs dans le repère de la molécule de référence
     u_h1 = qtn.rotate_vectors(q, r_h1) 
     u_h2 = qtn.rotate_vectors(q, r_h2) 
 
