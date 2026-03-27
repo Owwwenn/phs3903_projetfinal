@@ -1,13 +1,18 @@
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-
+from src.simulation_core.potential_force.potentiel_force import build_potential_vector_force_torque_matrix
+from src.simulation_core.potential_force.norms import build_inv_norm_matrix
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 mmass = 18.015          # g/mol
 kB    = 0.831446        # (g/mol)(Å/ps)²/K
-T_init = 273            # K
+T_init = 273   # K
+q_o = 1
+q_h = 1
+N  = 10
+L  = 30.0
 
 # SPC/E geometry in body frame
 OH_BOND   = 1.0         # Å
@@ -20,6 +25,7 @@ H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
 # Principal moments of inertia for SPC/E water (g/mol * Å²)
 I_body = np.array([1.3743, 1.9144, 0.6001])
 i1, i2, i3 = I_body
+
 
 # =============================================================================
 # SYSTEM CLASS
@@ -38,6 +44,7 @@ class MDSystem:
         self.neighbor_list = None
         self.neighbor_count = None
         self.size = np.zeros(3)
+        
 
 # =============================================================================
 # INITIALIZATION
@@ -62,10 +69,44 @@ def initialize_system(N, L):
     # remove center of mass drift
     sys.cm_vel -= sys.cm_vel.mean(axis=0)
 
+    # Sample angular momentum in BODY FRAME
+    Ix = i1
+    Iy = i2
+    Iz = i3
+
+    # Sample angular momentum in BODY FRAME
+    std_Lx = np.sqrt(Ix * kB * T_init)
+    std_Ly = np.sqrt(Iy * kB * T_init)
+    std_Lz = np.sqrt(Iz * kB * T_init)
+
+    Lx = np.random.normal(0, std_Lx, size=N)
+    Ly = np.random.normal(0, std_Ly, size=N)
+    Lz = np.random.normal(0, std_Lz, size=N)
+
+    sys.L[:, 0] = Lx
+    sys.L[:, 1] = Ly
+    sys.L[:, 2] = Lz
+
+    # -----------------------
+    # Remove total angular momentum (optional but recommended)
+    # -----------------------
+    L_total = sys.L.sum(axis=0)
+    sys.L -= L_total / N
+
+
     return sys
 
+sys = initialize_system(N, L)
+sys.quat = np.roll(Rotation.random(N).as_quat(), 1, axis=1)
 
-
+v = np.concatenate([
+    sys.cm_pos,
+    mmass * sys.cm_vel,
+    sys.quat,
+    sys.L
+], axis=1)
+print(np.array(v))
+U, F =build_potential_vector_force_torque_matrix(N,v,L, L, L,np.ones((N,N)) - np.eye(N) ,np.radians(HOH_ANGLE),q_o, q_h ) 
 
 
 
@@ -284,8 +325,6 @@ def rotational_energy(sys):
 # =============================================================================
 # MAIN
 # =============================================================================
-N  = 10
-L  = 30.0
 dt = 0.001
 n_steps = 100
 
@@ -293,19 +332,21 @@ sys = initialize_system(N, L)
 sys.cm_vel[0] = np.array([1.0, 0.0, 0.0])
 sys.L[0]      = np.array([0.0, 0.0, 1.0])
 
-compute_forces(sys)
-compute_torques(sys)
+#build_potential_vector_force_torque_matrix(10, , 30, 30, 30, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float
 
-for step in range(n_steps):
-    half_step_velocity(sys, dt)
-    half_step_L(sys, dt)
-    full_step_position(sys, dt)
-    get_quat(sys, dt)
-    compute_forces(sys)
-    compute_torques(sys)
-    half_step_velocity_final(sys, dt)
-    half_step_L_final(sys, dt)
+# compute_forces(sys)
+# compute_torques(sys)
 
-    KE = kinetic_energy(sys)
-    RE = rotational_energy(sys)
-    print(f"step {step:4d}: KE = {KE:.6f}  RE = {RE:.6f}  |q| = {np.linalg.norm(sys.quat[0]):.15f}")
+# for step in range(n_steps):
+#     half_step_velocity(sys, dt)
+#     half_step_L(sys, dt)
+#     full_step_position(sys, dt)
+#     get_quat(sys, dt)
+#     compute_forces(sys)
+#     compute_torques(sys)
+#     half_step_velocity_final(sys, dt)
+#     half_step_L_final(sys, dt)
+
+#     KE = kinetic_energy(sys)
+#     RE = rotational_energy(sys)
+#     print(f"step {step:4d}: KE = {KE:.6f}  RE = {RE:.6f}  |q| = {np.linalg.norm(sys.quat[0]):.15f}")

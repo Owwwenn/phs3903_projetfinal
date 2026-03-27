@@ -44,6 +44,7 @@ def initialize_molecules(N, L):
 
      return molecules
 
+print(initialize_molecules(10, 30))
 
 def compute_forces(molecules):
     for mol in molecules:
@@ -179,27 +180,27 @@ molecules[0].L = np.array([0.0, 0.0, 1.0])
 
 
 
-compute_forces(molecules)
-compute_torques(molecules)
-for step in range(n_steps):
-    # translational first half
-    half_step_velocity(molecules, dt)
-    # rotational first half
-    half_step_L(molecules, dt)
-    # full steps
-    full_step_position(molecules, dt)
-    get_quat(molecules, dt)
-    # recompute interactions at new positions/orientations
-    compute_forces(molecules)
-    compute_torques(molecules)
-    # translational second half
-    half_step_velocity_final(molecules, dt)
-    # rotational second half
-    half_step_L_final(molecules, dt)
-    # after each step check:
-    O, H1, H2 = get_atom_positions(molecules[0])
-    print(np.linalg.norm(H1 - O))   # should always be OH_BOND = 1.0
-    print(np.linalg.norm(H2 - O))   # should always be OH_BOND = 1.0
+# compute_forces(molecules)
+# compute_torques(molecules)
+# for step in range(n_steps):
+#     # translational first half
+#     half_step_velocity(molecules, dt)
+#     # rotational first half
+#     half_step_L(molecules, dt)
+#     # full steps
+#     full_step_position(molecules, dt)
+#     get_quat(molecules, dt)
+#     # recompute interactions at new positions/orientations
+#     compute_forces(molecules)
+#     compute_torques(molecules)
+#     # translational second half
+#     half_step_velocity_final(molecules, dt)
+#     # rotational second half
+#     half_step_L_final(molecules, dt)
+#     # after each step check:
+#     O, H1, H2 = get_atom_positions(molecules[0])
+#     print(np.linalg.norm(H1 - O))   # should always be OH_BOND = 1.0
+#     print(np.linalg.norm(H2 - O))   # should always be OH_BOND = 1.0
 
 
 
