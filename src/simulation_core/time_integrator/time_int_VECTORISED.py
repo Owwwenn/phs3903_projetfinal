@@ -1,9 +1,10 @@
 import sys
-sys.path.append("./src")
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import numpy as np
 from scipy.spatial.transform import Rotation
 from simulation_core.potential_force.potentiel_force import build_potential_vector_force_torque_matrix
-from simulation_core.potential_force.norms import build_inv_norm_matrix
+#from simulation_core.potential_force.norms import build_inv_norm_matrix
 
 # =============================================================================
 # CONSTANTS
