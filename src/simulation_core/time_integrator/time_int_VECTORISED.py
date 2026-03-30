@@ -488,7 +488,7 @@ def rotational_energy(sys):
 # =============================================================================
 
 
-dt = 0.000025
+dt = 0.0003
 n_steps = 100000
 s = np.zeros(n_steps)
 en = np.zeros(n_steps)
@@ -501,7 +501,7 @@ E_init     = kinetic_energy(sys) + rotational_energy(sys)
 L_init     = sys.L.sum(axis=0).copy()
 
 r_cut = 10.0   # cut-off radius (Å)
-skin  = 2.0    # skin pour neighbour list
+skin  = 4.0    # skin pour neighbour list
 sys.r_last = sys.cm_pos.copy()
 nbr_list = build_nl(sys, r_cut, skin, L)  # initial neighbour list
 
@@ -540,4 +540,11 @@ plt.plot(s, en)
 plt.show()
 
 
-
+"""
+TODO:
+- Inclure l'énergie potentiel pour mieux diagnostiquer le energy drift
+- Optimsier le calcul de la neighbour list
+- faire un graph du temps de simulation en fonction du nombre de molécule pour vérifier que la neighbour list transforme t(N^2) en t(N)
+- Implementer nose hoover
+- Tester avec potentiel Lennard Jones
+"""
