@@ -47,10 +47,10 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     rw = ri - L * np.round(ri / L)
     q_i = qtn.from_float_array(list_q[i_idx])
     q_j = qtn.from_float_array(list_q[j_idx])
-    q_i_rot = Rotation.from_quat(qtn.as_float_array(q_i)[:, [1,2,3,0]])
+    q_ip_rot = Rotation.from_quat(qtn.as_float_array(q_i.conjugate())[:, [1,2,3,0]])
     q = q_i.conjugate() * q_j
     # Passage du repère monde au repère de la molécule
-    r = q_i_rot.apply(rw)
+    r = q_ip_rot.apply(rw)
 
     # Définition des vecteurs dans le repère de la molécule de référence
     u_h1 = qtn.rotate_vectors(q, r_h1) 
