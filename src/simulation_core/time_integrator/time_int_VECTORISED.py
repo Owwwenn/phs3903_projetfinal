@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -127,20 +128,64 @@ def mic(dr, L):
 
 def wrap_positions(pos, L):
     return pos - L * np.floor(pos / L)
-    
+
+# =============================================================================
+# NEIGHBOUR LIST
+# =============================================================================
+def build_nl(sys, r_c, r_s, L):
+    rt = r_c + r_s
+    cm_pos = sys.cm_pos
+    N = len(cm_pos)
+    Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
+    nl = np.full((N, Nmax), -1, dtype=int)  
+    counts = np.zeros(N, dtype=int)
+    nbr_list = np.zeros((N, N))
+
+    for i in range(N):
+        for j in range(i+1, N):
+            dr = cm_pos[i] - cm_pos[j]
+            dr = mic(dr, L)
+
+            if np.dot(dr, dr) < rt**2:
+                
+                nl[i, counts[i]] = j
+                counts[i] += 1
+
+                
+                nl[j, counts[j]] = i
+                counts[j] += 1
+        
+    for i, neighbors in enumerate(nl):
+        neighbors = [j for j in neighbors if j >= 0]
+        nbr_list[i, neighbors] = 1
+
+        
+    return nbr_list
+
+
+
+def def_rebuild(sys, L, skin):
+    disp = sys.cm_pos - sys.r_last
+    disp = mic(disp, L)
+    max_disp = np.max(np.linalg.norm(disp, axis = 1))
+
+
+    return max_disp > (skin / 2)
+
+
 
 
 # =============================================================================
 # FORCE AND TORQUE
 # =============================================================================
-def compute_forces_and_torques(sys):
+def compute_forces_and_torques(sys, nbr_list):
     v = np.concatenate([
         sys.cm_pos.flatten(),
         sys.cm_vel.flatten(),
         sys.quat.flatten(),
         sys.L.flatten()
     ])
-    nbr_list = np.ones((sys.N, sys.N)) - np.eye(sys.N)
+
     U, F = build_potential_vector_force_torque_matrix(
         sys.N, v, L, L, L, nbr_list,
         np.radians(HOH_ANGLE), OH_BOND, q_o, q_h
@@ -295,48 +340,14 @@ def kinetic_energy(sys):
 def rotational_energy(sys):
     return 0.5 * np.sum((sys.L**2) / I_body)
 
-# =============================================================================
-# NEIGHBOUR LIST
-# =============================================================================
-def build_nl(sys, r_c, r_s, L):
-    rt = r_c + r_s
-    cm_pos = sys.cm_pos
-    N = len(cm_pos)
-    Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
-    nl = np.full((N, Nmax), -1, dtype=int)  
-    counts = np.zeros(N, dtype=int)
 
-    for i in range(N):
-        for j in range(i+1, N):
-            dr = cm_pos[i] - cm_pos[j]
-            dr = mic(dr, L)
-
-            if np.dot(dr, dr) < rt**2:
-                
-                nl[i, counts[i]] = j
-                counts[i] += 1
-
-                
-                nl[j, counts[j]] = i
-                counts[j] += 1
-
-    return nl, counts
-
-
-            
-
-def def_rebuild(sys, L, skin):
-    disp = sys.cm_pos - sys.r_last
-    disp = mic(disp, L)
-    max_disp = np.max(np.linalg.norm(disp, axis = 1))
-
-
-    return max_disp > (skin / 2)
     
 
 # =============================================================================
 # MAIN
 # =============================================================================
+
+
 dt = 0.000025
 n_steps = 100000
 s = np.zeros(100000)
@@ -349,15 +360,25 @@ pos_init   = sys.cm_pos.copy()
 E_init     = kinetic_energy(sys) + rotational_energy(sys)
 L_init     = sys.L.sum(axis=0).copy()
 
-compute_forces_and_torques(sys)
+r_cut = 10.0   # cut-off radius (Å)
+skin  = 2.0    # skin pour neighbour list
+sys.r_last = sys.cm_pos.copy()
+nbr_list = build_nl(sys, r_cut, skin, L)  # initial neighbour list
+
+compute_forces_and_torques(sys, nbr_list)
 
 for step in range(n_steps):
+    if def_rebuild(sys, L, skin):
+        nbr_list = build_nl(sys, r_cut, skin, L)
+        sys.r_last = sys.cm_pos.copy()
+
+
     half_step_velocity(sys, dt)
     half_step_L(sys, dt)
     get_quat(sys, dt)
     full_step_position(sys, dt)
     sys.cm_pos = wrap_positions(sys.cm_pos, L)
-    compute_forces_and_torques(sys)
+    compute_forces_and_torques(sys, nbr_list)
     half_step_velocity_final(sys, dt)
     half_step_L_final(sys, dt)
 
