@@ -21,7 +21,7 @@ q_o = -0.8476
 q_h = 0.4238
 
 N = 15
-L = 30
+L = 6.2
 
 ex = np.array([1.0, 0.0, 0.0])
 ey = np.array([0.0, 1.0, 0.0])
@@ -34,17 +34,8 @@ HOH_ANGLE = 109.47
 O_body = np.array([0.0, 0.0, 0.0])
 angle_rad = np.radians(HOH_ANGLE / 2)
 
-H1_body = np.array([
-    np.sin(angle_rad),
-    -np.cos(angle_rad),
-    0.0
-]) * OH_BOND
-
-H2_body = np.array([
-    -np.sin(angle_rad),
-    -np.cos(angle_rad),
-    0.0
-]) * OH_BOND
+H1_body = np.array([0.0, np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
+H2_body = np.array([0.0, -np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
 
 # Principal moments of inertia
 I_body = np.array([1.3743, 1.9144, 0.6001])
@@ -61,6 +52,7 @@ class MDSystem:
         self.cm_pos = np.zeros((N, 3))
         self.cm_vel = np.zeros((N, 3))
         self.force = np.zeros((N, 3))
+        self.U = 0.0
 
         self.L = np.zeros((N, 3))
         self.T = np.zeros((N, 3))
@@ -184,10 +176,19 @@ def compute_forces_and_torques(sys):
         sys.L.flatten()
     ])
 
+    #print("nbr_list sum:", np.sum(nbr_list))
+    #print("cm_pos sample:", sys.cm_pos[:2])
+    #print("quat sample:", sys.quat[:2])
+
     U, F = build_potential_vector_force_torque_matrix(
         sys.N, v, L, L, L, nbr_list,
         np.radians(HOH_ANGLE), OH_BOND, q_o, q_h, 0, 0)
+    
+    #print("U brut:", U[:3])
+    #print("U sum:", np.sum(U)/2)
 
+    sys.U = np.sum(U) / 2
+    
     R = Rotation.from_quat(sys.quat[:, [1, 2, 3, 0]])
 
     sys.force = R.apply(F[:, :3]) # body --- lab
@@ -212,6 +213,9 @@ def half_step_velocity_final(sys, dt):
 # ROTATIONAL INTEGRATOR
 # =============================================================================
 
+
+_rotation_angles = None
+
 def half_step_L(sys, dt):
     R = Rotation.from_quat(sys.quat[:, [1, 2, 3, 0]])
     T_body = R.inv().apply(sys.T)
@@ -233,7 +237,30 @@ def half_step_L(sys, dt):
         c*Ly - s*Lz,
         s*Ly + c*Lz
     ], axis=1)
+    global _rotation_angles
+    
+    # R = Rotation.from_quat(sys.quat[:, [1, 2, 3, 0]])
+    # T_body = R.inv().apply(sys.T)
+    # sys.L += 0.5 * dt * T_body
 
+    # Lx, Ly, Lz = sys.L.T
+
+    # # Ry(dt/2)
+    # alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
+    # c, s = np.cos(alpha), np.sin(alpha)
+    # Lx, Lz = c*Lx + s*Lz, -s*Lx + c*Lz
+
+    # # Rx(dt/2)
+    # beta = (dt / 2) * (1/i3 - 1/i1) * Lx
+    # c, s = np.cos(beta), np.sin(beta)
+    # Ly, Lz = c*Ly - s*Lz, s*Ly + c*Lz
+
+    # _rotation_angles = (alpha, beta)
+    # sys.L = np.stack([Lx, Ly, Lz], axis=1)
+
+
+   
+    
 
 def quat_mul(q, r):
     w1, x1, y1, z1 = q.T
@@ -293,6 +320,25 @@ def half_step_L_final(sys, dt):
 
     sys.L += 0.5 * dt * T_body
 
+    # global _rotation_angles
+    # alpha, beta = _rotation_angles
+
+    # Lx, Ly, Lz = sys.L.T
+
+    # # Rx(-dt/2) — inverse exact de Rx(dt/2)
+    # c, s = np.cos(beta), np.sin(beta)
+    # Ly, Lz = c*Ly + s*Lz, -s*Ly + c*Lz
+
+    # # Ry(-dt/2) — inverse exact de Ry(dt/2)
+    # c, s = np.cos(alpha), np.sin(alpha)
+    # Lx, Lz = c*Lx - s*Lz, s*Lx + c*Lz
+
+    # sys.L = np.stack([Lx, Ly, Lz], axis=1)
+
+    # R = Rotation.from_quat(sys.quat[:, [1, 2, 3, 0]])
+    # T_body = R.inv().apply(sys.T)
+    # sys.L += 0.5 * dt * T_body
+
 # =============================================================================
 # ENERGY
 # =============================================================================
@@ -309,7 +355,7 @@ def rotational_energy(sys):
 # =============================================================================
 
 dt = 0.0003
-n_steps = 100000
+n_steps = 5
 
 s  = np.zeros(n_steps)
 en = np.zeros(n_steps)
@@ -318,21 +364,22 @@ sys = initialize_system(N, L)
 sys.cm_pos = wrap_positions(sys.cm_pos, L)
 sys.quat = np.roll(Rotation.random(N).as_quat(), 1, axis=1)
 
-E_init = kinetic_energy(sys) + rotational_energy(sys)
+
 L_init = sys.L.sum(axis=0).copy()
 
-r_cut = 10.0   # cut-off radius (Å)
-skin  = 2.0    # skin pour neighbour list
-sys.r_last = sys.cm_pos.copy()
-nbr_list = build_nl(sys, r_cut, skin, L)  # initial neighbour list
+# r_cut = 10.0   # cut-off radius (Å)
+# skin  = 2.0    # skin pour neighbour list
+# sys.r_last = sys.cm_pos.copy()
+nbr_list = np.ones((N,N))- np.eye(N)
 
 compute_forces_and_torques(sys)
+E_init = kinetic_energy(sys) + rotational_energy(sys) + sys.U
 
 for step in range(n_steps):
 
-    if def_rebuild(sys, L, skin):
-        nbr_list = build_nl(sys, r_cut, skin, L)
-        sys.r_last = sys.cm_pos.copy()
+    #if def_rebuild(sys, L, skin):
+        #nbr_list = build_nl(sys, r_cut, skin, L)
+        #sys.r_last = sys.cm_pos.copy()
 
     half_step_velocity(sys, dt)
     half_step_L(sys, dt)
@@ -346,13 +393,14 @@ for step in range(n_steps):
 
     half_step_velocity_final(sys, dt)
     half_step_L_final(sys, dt)
-
-    E = kinetic_energy(sys) + rotational_energy(sys)
+    Ekin = kinetic_energy(sys)
+    Erot = rotational_energy(sys)
+    E = kinetic_energy(sys) + rotational_energy(sys) + sys.U
     T = 2 * kinetic_energy(sys) / (3 * N * kB)
-
+ 
     L_tot = sys.L.sum(axis=0)
     qnorm = np.max(np.abs(np.linalg.norm(sys.quat, axis=1) - 1.0))
-
+    
     s[step]  = step
     en[step] = E
 
@@ -362,14 +410,11 @@ for step in range(n_steps):
         f"T={T:.1f}K | "
         f"|L_drift|={np.linalg.norm(L_tot-L_init):.2e} | "
         f"qnorm_err={qnorm:.2e}"
+        f"step {step:6d} | Ekin={Ekin:.2f} | Erot={Erot:.2f} | U={sys.U:.2f} | Etot={E:.2f}"
+        
     )
-
-print(max(abs(en - E_init) / E_init * 100))
-
-plt.plot(s, en)
-plt.show()
-
-
+    print("F sum:", sys.force.sum(axis=0))  # devrait être ~0
+    print("T sum:", sys.T.sum(axis=0))      # devrait être ~0
 
 
 
