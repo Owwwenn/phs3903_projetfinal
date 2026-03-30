@@ -295,12 +295,49 @@ def kinetic_energy(sys):
 def rotational_energy(sys):
     return 0.5 * np.sum((sys.L**2) / I_body)
 
+# =============================================================================
+# NEIGHBOUR LIST
+# =============================================================================
+def build_nl(sys, r_c, r_s, L):
+    rt = r_c + r_s
+    cm_pos = sys.cm_pos
+    N = len(cm_pos)
+    Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
+    nl = np.full((N, Nmax), -1, dtype=int)  
+    counts = np.zeros(N, dtype=int)
 
+    for i in range(N):
+        for j in range(i+1, N):
+            dr = cm_pos[i] - cm_pos[j]
+            dr = mic(dr, L)
+
+            if np.dot(dr, dr) < rt**2:
+                
+                nl[i, counts[i]] = j
+                counts[i] += 1
+
+                
+                nl[j, counts[j]] = i
+                counts[j] += 1
+
+    return nl, counts
+
+
+            
+
+def def_rebuild(sys, L, skin):
+    disp = sys.cm_pos - sys.r_last
+    disp = mic(disp, L)
+    max_disp = np.max(np.linalg.norm(disp, axis = 1))
+
+
+    return max_disp > (skin / 2)
+    
 
 # =============================================================================
 # MAIN
 # =============================================================================
-dt = 0.0005
+dt = 0.000025
 n_steps = 100000
 s = np.zeros(100000)
 en = np.zeros(100000)
@@ -339,45 +376,9 @@ for step in range(n_steps):
 # dt = 0.001
 # ani = animate_simulation(n_steps=500, dt=0.001, interval=50)
 
-
+print(max(abs(en - E_init*np.ones(len(en)))/E_init*100))
 plt.plot(s, en)
 plt.show()
 
 
 
-# =============================================================================
-# NEIGHBOUR LIST
-# =============================================================================
-#def build_nl(sys, r_c, r_s, L):
-#     rt = r_c + r_s
-#     cm_pos = sys.cm_pos
-#     N = len(cm_pos)
-#     Nmax = int(np.ceil(1.2 * 418.9 * rt**3))
-#     nl = np.full((N, Nmax), -1, dtype=int)  
-#     counts = np.zeros(N, dtype=int)
-
-#     for i in range(N):
-#         for j in range(i+1, N):
-#             dr = cm_pos[i] - cm_pos[j]
-#             dr = mic(dr, L)
-
-#             if np.dot(dr, dr) < rt**2:
-                
-#                 nl[i, counts[i]] = j
-#                 counts[i] += 1
-
-                
-#                 nl[j, counts[j]] = i
-#                 counts[j] += 1
-
-#     return nl, counts
-            
-
-# def def_rebuild(sys, L, skin):
-#     disp = sys.cm_pos - sys.r_last
-#     disp = mic(disp, L)
-#     max_disp = np.max(np.linalg.norm(disp, axis = 1))
-
-
-#     return max_disp > (skin / 2)
-    
