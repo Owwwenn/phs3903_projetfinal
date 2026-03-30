@@ -8,14 +8,14 @@ from simulation_core.potential_force.potentiel_force import build_potential_vect
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
-#from simulation_core.potential_force.norms import build_inv_norm_matrix
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-mmass = 18.015          # g/mol
-kB    = 0.831446        # (g/mol)(Å/ps)²/K
-T_init = 273   # K
+mmass = 18.015         
+kB    = 0.831446        
+T_init = 273   
 q_o = -0.8476   
 q_h = 0.4238
 N  = 15
@@ -26,14 +26,14 @@ ez = np.array([0.0,0.0,1.0])
 
 
 # SPC/E geometry in body frame
-OH_BOND   =      1   # Å
-HOH_ANGLE = 109.47      # degrees
+OH_BOND   =      1   
+HOH_ANGLE = 109.47      
 O_body    = np.array([0.0, 0.0, 0.0])
 angle_rad = np.radians(HOH_ANGLE / 2)
 H1_body   = np.array([ np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
 H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
 
-# Principal moments of inertia for SPC/E water (g/mol * Å²)
+# Principal moments of inertia for SPC/E water
 I_body = np.array([1.3743, 1.9144, 0.6001])
 i1, i2, i3 = I_body
 
@@ -42,15 +42,30 @@ i1, i2, i3 = I_body
 # SYSTEM CLASS
 # =============================================================================
 class MDSystem:
+    """Classe représentant un système de dynamique moléculaire de molécules rigides.
+
+    Attributs:
+        N (int): Nombre de molécules
+        cm_pos (np.ndarray): Positions des centres de masse (N, 3)
+        cm_vel (np.ndarray): Vitesses des centres de masse (N, 3)
+        force (np.ndarray): Forces appliquées sur les centres de masse (N, 3)
+        L (np.ndarray): Moments cinétiques angulaires dans ref lab(N, 3)
+        T (np.ndarray): Couples (torques) appliqués dans ref lab (N, 3)
+        quat (np.ndarray): Quaternions d’orientation (N, 4)
+        r_last (np.ndarray): Positions lors du dernier rebuild de neighbour list
+        neighbor_list: Liste des voisins, matrice de 0 et de 1 
+        neighbor_count: Nombre de voisins
+        size (np.ndarray): Taille de la boîte de simulation
+    """
     def __init__(self, N):
         self.N       = N
-        self.cm_pos  = np.zeros((N, 3))   # center of mass positions
-        self.cm_vel  = np.zeros((N, 3))   # center of mass velocities
-        self.force   = np.zeros((N, 3))   # forces on COM
-        self.L       = np.zeros((N, 3))   # angular momentum in body frame
-        self.T       = np.zeros((N, 3))   # torque in lab frame
-        self.quat    = np.zeros((N, 4))   # quaternion (w, x, y, z)
-        self.quat[:, 0] = 1.0             # identity quaternion for all
+        self.cm_pos  = np.zeros((N, 3))   # 
+        self.cm_vel  = np.zeros((N, 3))   # 
+        self.force   = np.zeros((N, 3))   # 
+        self.L       = np.zeros((N, 3))   #
+        self.T       = np.zeros((N, 3))   # 
+        self.quat    = np.zeros((N, 4))   # 
+        self.quat[:, 0] = 1.0             # 
         self.r_last = np.zeros((N, 3))
         self.neighbor_list = None
         self.neighbor_count = None
@@ -61,6 +76,16 @@ class MDSystem:
 # INITIALIZATION
 # =============================================================================
 def initialize_system(N, L):
+    """Initialise un système de N molécules dans une boîte cubique.
+
+    Args:
+        N (int): Nombre de molécules
+        L (float): Taille de la boîte cubique
+
+    Returns:
+        MDSystem: Système initialisé avec positions, vitesses et moments angulaires
+    """
+
     sys = MDSystem(N)
 
     # positions on cubic grid
@@ -112,6 +137,16 @@ def initialize_system(N, L):
 # GEOMETRY
 # =============================================================================
 def get_atom_positions(sys):
+
+    """Calcule les positions des atomes (O, H1, H2) dans le repère laboratoire.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+
+    Returns:
+         Positions des atomes O, H1 et H2
+    """
+
     O_lab  = np.zeros((sys.N, 3))
     H1_lab = np.zeros((sys.N, 3))
     H2_lab = np.zeros((sys.N, 3))
@@ -124,15 +159,44 @@ def get_atom_positions(sys):
     return O_lab, H1_lab, H2_lab
 
 def mic(dr, L):
+       """Applique la convention d'image minimale (Minimum Image Convention).
+
+    Args:
+        dr (np.ndarray): Vecteur de distance
+        L (float): Taille de la boîte
+
+    Returns:
+        np.ndarray: Distance corrigée avec conditions périodiques
+    """
        return dr - L * np.round(dr / L)
 
 def wrap_positions(pos, L):
+    """Ramène les positions dans la boîte de simulation (conditions périodiques).
+
+    Args:
+        pos (np.ndarray): Positions
+        L (float): Taille de la boîte
+
+    Returns:
+        np.ndarray: Positions corrigé dans la boîte
+    """
     return pos - L * np.floor(pos / L)
 
 # =============================================================================
 # NEIGHBOUR LIST
 # =============================================================================
 def build_nl(sys, r_c, r_s, L):
+    """Construit la liste des voisins pour chaque molécule.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+        r_c (float): Rayon de coupure
+        r_s (float): Distance de skin (buffer pour ne pas calculer la nl a chaque etape)
+        L (float): Taille de la boîte
+
+    Returns:
+        np.ndarray: Matrice de voisin (N, N) binaire
+    """
     rt = r_c + r_s
     cm_pos = sys.cm_pos
     N = len(cm_pos)
@@ -165,12 +229,24 @@ def build_nl(sys, r_c, r_s, L):
 
 
 def def_rebuild(sys, L, skin):
-    disp = sys.cm_pos - sys.r_last
-    disp = mic(disp, L)
-    max_disp = np.max(np.linalg.norm(disp, axis = 1))
+     
+     """Détermine si la neighbour list doit être reconstruite.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+        L (float): Taille de la boîte
+        skin (float): Distance de peau
+
+    Returns:
+        bool: True si reconstruction nécessaire
+    """
+
+     disp = sys.cm_pos - sys.r_last
+     disp = mic(disp, L)
+     max_disp = np.max(np.linalg.norm(disp, axis = 1))
 
 
-    return max_disp > (skin / 2)
+     return max_disp > (skin / 2)
 
 
 
@@ -179,6 +255,15 @@ def def_rebuild(sys, L, skin):
 # FORCE AND TORQUE
 # =============================================================================
 def compute_forces_and_torques(sys, nbr_list):
+    """Calcule les forces et les couples appliqués sur chaque molécule.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+        nbr_list (np.ndarray): Liste des voisins
+
+    Returns:
+        None: Met à jour sys.force et sys.T
+    """
     v = np.concatenate([
         sys.cm_pos.flatten(),
         sys.cm_vel.flatten(),
@@ -198,27 +283,51 @@ def compute_forces_and_torques(sys, nbr_list):
 # TRANSLATIONAL INTEGRATOR
 # =============================================================================
 def half_step_velocity(sys, dt):
+    """Effectue un demi-pas de vitesse (Velocity Verlet).
+
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+    """
     sys.cm_vel += 0.5 * (sys.force / mmass) * dt
 
 def full_step_position(sys, dt):
+    """Met à jour les positions sur un pas complet.
+
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+    """
     sys.cm_pos += sys.cm_vel * dt
     
 
 def half_step_velocity_final(sys, dt):
+    """Effectue le second demi-pas de vitesse.
+
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+    """ 
     sys.cm_vel += 0.5 * (sys.force / mmass) * dt
 
 # =============================================================================
 # ROTATIONAL INTEGRATOR
 # =============================================================================
 def half_step_L(sys, dt):
-    # --- 1. Lab → body frame torque (vectorized) ---
+    """Effectue un demi-pas sur le moment cinétique angulaire.
+
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+    """
+    #  Lab a body frame torque
     R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
     T_body = R.inv().apply(sys.T)
 
-    # --- 2. Half-step torque update ---
+    #  Half-step torque update
     sys.L += 0.5 * dt * T_body
 
-    # --- 3. Ry rotation (around y-axis) ---
+    # Ry rotation
     Lx, Ly, Lz = sys.L.T
 
     alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
@@ -231,7 +340,7 @@ def half_step_L(sys, dt):
 
     sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
 
-    # --- 4. Rx rotation (around x-axis) ---
+    #  Rx rotation
     Lx, Ly, Lz = sys.L.T
 
     beta = (dt / 2) * (1/i3 - 1/i1) * Lx
@@ -246,7 +355,15 @@ def half_step_L(sys, dt):
 
 
 def quat_mul(q, r):
-    # q, r : (N, 4) avec (w, x, y, z)
+    """Multiplie deux quaternions.
+
+    Args:
+        q (np.ndarray): Quaternion (N, 4)
+        r (np.ndarray): Quaternion (N, 4)
+
+    Returns:
+        np.ndarray: Produit quaternion (N, 4)
+    """
     w1, x1, y1, z1 = q.T
     w2, x2, y2, z2 = r.T
 
@@ -260,12 +377,20 @@ def quat_mul(q, r):
 
     
 def axis_angle_to_quat(axis, angle):
-    # axis: (3,), angle: (N,)
-    half = 0.5 * angle
-    s = np.sin(half)
-    c = np.cos(half)
+     """Convertit une rotation angulaire en quaternion.
 
-    return np.stack([
+    Args:
+        axis (np.ndarray): Axe de rotation (3,)
+        angle (np.ndarray): Angle de rotation (N,)
+
+    Returns:
+        np.ndarray: Quaternion correspondant (N, 4)
+    """
+     half = 0.5 * angle
+     s = np.sin(half)
+     c = np.cos(half)
+
+     return np.stack([
         c,
         axis[0]*s,
         axis[1]*s,
@@ -273,36 +398,51 @@ def axis_angle_to_quat(axis, angle):
     ], axis=1)
 
 def get_quat(sys, dt):
+    """Met à jour les quaternions via l'intégration des rotations.
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+
+    Returns:
+        None: Met à jour sys.quat
+    """
     q = sys.quat  # (N, 4)
     omega = sys.L / I_body  # (N, 3)
 
   
-    # rotations élémentaires (vectorisées)
+    # rotations élémentaires 
     qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
     qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
     qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
     qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
     qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
 
-    # application (ordre IMPORTANT)
+    # application 
     q = quat_mul(qy1, q)
     q = quat_mul(qx1, q)
     q = quat_mul(qz,  q)
     q = quat_mul(qx2, q)
     q = quat_mul(qy2, q)
 
-    # # normalisation (vectorisée)
+    # # normalisation 
     q /= np.linalg.norm(q, axis=1, keepdims=True)
 
     sys.quat = q
             
 
 def half_step_L_final(sys, dt):
-    # --- 1. Lab → body frame torque (vectorized) ---
+
+    """Effectue le second demi-pas du moment cinétique angulaire.
+
+    Args:
+        sys (MDSystem): Système
+        dt (float): Pas de temps
+    """
+    #Lab a body frame torque 
     R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
     T_body = R.inv().apply(sys.T)
 
-    # --- 2. Rx rotation FIRST (reversed order) ---
+    # Rx rotation
     Lx, Ly, Lz = sys.L.T
 
     beta = (dt / 2) * (1/i3 - 1/i1) * Lx
@@ -315,7 +455,7 @@ def half_step_L_final(sys, dt):
 
     sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
 
-    # --- 3. Ry rotation ---
+    # Ry rotation
     Lx, Ly, Lz = sys.L.T
 
     alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
@@ -350,8 +490,8 @@ def rotational_energy(sys):
 
 dt = 0.000025
 n_steps = 100000
-s = np.zeros(100000)
-en = np.zeros(100000)
+s = np.zeros(n_steps)
+en = np.zeros(n_steps)
 sys = initialize_system(N, L)
 sys.cm_pos = wrap_positions(sys.cm_pos, L)
 sys.quat = np.roll(Rotation.random(N).as_quat(), 1, axis=1)
@@ -394,8 +534,6 @@ for step in range(n_steps):
           f"T={T:.1f}K | |L_drift|={np.linalg.norm(L_tot-L_init):.2e} | "
           f"qnorm_err={qnorm:.2e}")
 
-# dt = 0.001
-# ani = animate_simulation(n_steps=500, dt=0.001, interval=50)
 
 print(max(abs(en - E_init*np.ones(len(en)))/E_init*100))
 plt.plot(s, en)
