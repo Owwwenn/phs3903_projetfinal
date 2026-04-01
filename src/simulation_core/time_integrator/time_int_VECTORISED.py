@@ -20,7 +20,7 @@ T_init = 273
 q_o = -0.8476   
 q_h = 0.4238
 N  = 2
-L  = 3
+L  = 30
 ex = np.array([1.0,0.0,0.0])
 ey = np.array([0.0,1.0,0.0])
 ez = np.array([0.0,0.0,1.0])
@@ -285,7 +285,7 @@ def compute_forces_and_torques(sys, nbr_list):
 
     U, F = build_potential_vector_force_torque_matrix(
         sys.N, v, L, L, L, nbr_list,
-        np.radians(HOH_ANGLE), OH_BOND, q_o, q_h, 0, 0)
+        np.radians(HOH_ANGLE), OH_BOND, q_o, q_h, epsilon, sigma)
     
     #print(f"F_raw sample = {F[:2]}")
 
@@ -503,13 +503,25 @@ def rotational_energy(sys):
 # =============================================================================
 
 
+
+
 dt = 0.0003
-n_steps = 10000
+n_steps = 100000
 s = np.zeros(n_steps)
 en = np.zeros(n_steps)
 sys = initialize_system(N, L)
 sys.cm_pos = wrap_positions(sys.cm_pos, L)
 sys.quat = np.roll(Rotation.random(N).as_quat(), 1, axis=1)
+
+dist_OO   = np.zeros(n_steps)
+dist_OH1  = np.zeros(n_steps)
+dist_OH2  = np.zeros(n_steps)
+dist_H1H2 = np.zeros(n_steps)
+dist_H1O  = np.zeros(n_steps)
+dist_H2O  = np.zeros(n_steps)
+dist_H1H1 = np.zeros(n_steps)
+dist_H2H2 = np.zeros(n_steps)
+dist_H1H2b= np.zeros(n_steps)
 
 pos_init   = sys.cm_pos.copy()
 L_init     = sys.L.sum(axis=0).copy()
@@ -553,6 +565,20 @@ for step in range(n_steps):
     U_arr[step] = sys.U
     F_norms[step] = np.linalg.norm(sys.force)
     T_norms[step] = np.linalg.norm(sys.T)
+    O, H1, H2 = get_atom_positions(sys)
+
+    # molécule 0 vs molécule 1
+    dist_OO[step]   = np.linalg.norm(mic(O[0]  - O[1],  L))
+    # dist_OH1[step]  = np.linalg.norm(mic(O[0]  - H1[1], L))
+    # dist_OH2[step]  = np.linalg.norm(mic(O[0]  - H2[1], L))
+    # dist_H1O[step]  = np.linalg.norm(mic(H1[0] - O[1],  L))
+    # dist_H2O[step]  = np.linalg.norm(mic(H2[0] - O[1],  L))
+    # dist_H1H1[step] = np.linalg.norm(mic(H1[0] - H1[1], L))
+    # dist_H1H2[step] = np.linalg.norm(mic(H1[0] - H2[1], L))
+    # dist_H1H2b[step] = np.linalg.norm(mic(H2[0] - H1[1], L))
+    # dist_H2H2[step] = np.linalg.norm(mic(H2[0] - H2[1], L))
+
+
     print(f"step {step:4d} | E={E:.4f} dE={abs(E-E_init)/E_init*100:.4f}% | "
           f"T={T:.1f}K | |L_drift|={np.linalg.norm(L_tot-L_init):.2e} | "
           f"qnorm_err={qnorm:.2e}| sum T = {sys.T.sum(axis=0)}")
@@ -624,6 +650,23 @@ plt.plot(U_arr)
 plt.title('U')
 plt.xlabel('step')
 
+plt.tight_layout()
+
+
+plt.figure(figsize=(14, 4))
+plt.plot(dist_OO,   label='O-O')
+#plt.plot(dist_OH1,  label='O-H1')
+#plt.plot(dist_OH2,  label='O-H2')
+#plt.plot(dist_H1O,  label='H1-O')
+#plt.plot(dist_H2O,  label='H2-O')
+#plt.plot(dist_H1H1, label='H1-H1')
+#plt.plot(dist_H1H2, label='H1-H2')
+#plt.plot(dist_H1H2b, label='H2-H1')
+#plt.plot(dist_H2H2, label='H2-H2')
+plt.xlabel('step')
+plt.ylabel('distance (Å)')
+plt.title('distances inter-moléculaires')
+plt.legend()
 plt.tight_layout()
 plt.show()
 
