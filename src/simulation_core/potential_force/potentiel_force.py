@@ -35,7 +35,7 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     # Potentiel et forces pour Lennard-Jones
     inv_rOO = inv_norm_matrix_list[0]; grad_rOO = deriv_matrices[0]
     U_LJ = np.sum(4*eps_LJ*((sigma_LJ*inv_rOO)**12 - (sigma_LJ*inv_rOO)**6), axis=0)
-    F_LJ = np.einsum('ij,ijk->ik', 4*eps_LJ*((6*sigma_LJ**6) * (inv_rOO**7) - (12*sigma_LJ**12) * (inv_rOO**13)), grad_rOO)
+    F_LJ = np.einsum('ij,ijk->ik', 4 * eps_LJ * inv_rOO * (6*(sigma_LJ*inv_rOO)**6- 12*(sigma_LJ * inv_rOO)**12), grad_rOO)
 
     U = U_coulomb + U_LJ
     F = F_coulomb + F_LJ 
@@ -46,6 +46,4 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
 TODO:
 - Vérifier que je peux utiliser les quaternions monde pour passer de gradient quaternion à torque
 - Transformer F dans le repère monde
-- Calculer le gradient de potentiel pour les forces en même temps? pour éviter les appels répétés des mêmes fonctions.
-- Déterminer s'il est nécessaire d'ajouter le 1/(4 pi epsilon0) ici 
 """
