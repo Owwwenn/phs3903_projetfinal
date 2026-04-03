@@ -7,29 +7,29 @@ Créer une venv pour le projet.
 
 ### 1- Installer virtualenv
 
-)
+```
 pip install virtualenv
-)
+```
 
 ### 2- Dans le dossier du projet (cd dans la bonne dir si besoin), activer la venv:
 
 Windows:
 
-)
+```
 .\venv\Scripts\activate
-)
+```
 
 Linux:
 
-)
+```
 source .venv/bin/activate
-)
+```
 
 ### 3- Installer les dépendances dans la venv
 
-)
+```
 pip install -r requirements.txt
-)
+```
 
 # (WIP) Tâches à réaliser:
 ### Infrastucture de simulation:
