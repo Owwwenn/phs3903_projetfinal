@@ -2,7 +2,7 @@ import numpy as np
 import quaternion as qtn
 from scipy.spatial.transform import Rotation
 
-def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
+def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
     """Calcule les potentiels, forces, torques pour une molécule à trois site donné, avec Coulomb et LJ.
 
     Args:
@@ -23,8 +23,8 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     Returns:
         list: U, F, tau Arrays de potentiels, Forces et Torque
     """
-    list_r = v[:3*n].reshape(n,3)
-    list_q = v[6*n:10*n].reshape(n,4)[:, [3,0,1,2]] 
+    list_r = r
+    list_q = q[:, [3,0,1,2]]
     L = np.array([Lx,Ly,Lz])
 
     s = np.sin(theta/2)
@@ -112,3 +112,24 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     tau += scatter_torque(v_h2, -F_pair[[2, 5, 8]],  j_idx)
 
     return U, F, tau
+
+def compute_forces_and_torques(sys, model, param, nbr_list):
+    """Calcule les forces et les couples appliqués sur chaque molécule.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+        nbr_list (np.ndarray): Liste des voisins
+
+    Returns:
+        None: Met à jour sys.force et sys.T
+    """
+    Lx, Ly, Lz = param.L
+    
+    U, F, tau = build_potential_vector_force_torque_matrix(
+        sys.N, sys.cm_pos, sys.quat, Lx, Ly, Lz, nbr_list, 
+        model.HOH_rad, model.OH, model.q_o, model.q_h,
+        model.eps_LJ, model.sigma_LJ, param.k_coul)
+    
+    sys.U = np.sum(U) / 2
+    sys.force = F
+    sys.T     = tau

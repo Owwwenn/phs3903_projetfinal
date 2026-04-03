@@ -1,15 +1,10 @@
 import numpy as np
+from md_sim.caracterisation.energy import kinetic_energy, rotational_energy
 from md_sim.models.three_site import spc_e
 from md_sim.core.time_integrator.time_int_VECTORISED import MDSystem
 
 kB = 0.831446
          
-def kinetic_energy(sys, model): 
-    return 0.5 * model.mass * np.sum(sys.cm_vel**2)
-
-def rotational_energy(sys, model):
-    return 0.5 * np.sum((sys.L**2) / model.I_body)
-
 def update_eta(sys, model, N, dt):
     g = 6*N 
     relax_time = 100*dt
