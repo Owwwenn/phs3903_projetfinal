@@ -3,7 +3,7 @@
 Le projet consiste à simuler une centaine de molécules d'eau à leur transistion de phase liquide-gaz et gaz-liquide.
 
 # Setup
-Créer une venv pour le projet.
+Après avoir cloné le repo, créer une venv pour le projet pour éviter les problèmes de dépendances.
 
 ### 1- Installer virtualenv
 
@@ -30,6 +30,8 @@ source .venv/bin/activate
 ```
 pip install -r requirements.txt
 ```
+
+Si tout foncitonne, il ne devrait pas y avoir de problèmes avec les imports de fonctions depuis les autres fichier.
 
 # (WIP) Tâches à réaliser:
 ### Infrastucture de simulation:
