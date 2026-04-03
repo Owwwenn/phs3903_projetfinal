@@ -1,4 +1,4 @@
-from simulation_core.potential_force.norms import build_inv_norm_matrix
+from md_sim.core.potential_force.norms import build_inv_norm_matrix
 import numpy as np
 
 def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float):
@@ -28,14 +28,19 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     right_charge_vector_list = np.array(([q_o*np.ones(n)] + [q_h*np.ones(n)]*2) * 3)
 
     # Potentiel et forces pour Coulomb
+    k_coul = 1389
     inml2 = (inv_norm_matrix_list**2)[..., None]
-    U_coulomb = np.einsum("ki,kij,kj->i", left_charge_vector_list, inv_norm_matrix_list, right_charge_vector_list)
-    F_coulomb = np.einsum("ij,ijkl,ik->jl", left_charge_vector_list, deriv_matrices * inml2, right_charge_vector_list)
+    U_coulomb = k_coul * np.einsum("ki,kij,kj->i", left_charge_vector_list, inv_norm_matrix_list, right_charge_vector_list)
+    F_coulomb = k_coul * np.einsum("ij,ijkl,ik->jl", left_charge_vector_list, deriv_matrices * inml2, right_charge_vector_list)
 
     # Potentiel et forces pour Lennard-Jones
     inv_rOO = inv_norm_matrix_list[0]; grad_rOO = deriv_matrices[0]
     U_LJ = np.sum(4*eps_LJ*((sigma_LJ*inv_rOO)**12 - (sigma_LJ*inv_rOO)**6), axis=0)
-    F_LJ = np.einsum('ij,ijk->ik', 4 * eps_LJ * inv_rOO * (6*(sigma_LJ*inv_rOO)**6- 12*(sigma_LJ * inv_rOO)**12), grad_rOO)
+    sr6 = (sigma_LJ * inv_rOO)**6
+    sr12 = sr6**2
+    prefac = 4 * eps_LJ * ( -12 * sr12 + 6 * sr6 ) * inv_rOO
+    F_LJ = -np.einsum('ij,ijk->ik', prefac, grad_rOO)
+    # F_LJ = np.einsum('ij,ijk->ik', 4 * eps_LJ * inv_rOO * (6*(sigma_LJ*inv_rOO)**6- 12*(sigma_LJ * inv_rOO)**12), grad_rOO)
 
     U = U_coulomb + U_LJ
     F = F_coulomb + F_LJ 

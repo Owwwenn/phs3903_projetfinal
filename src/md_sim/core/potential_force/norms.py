@@ -57,8 +57,10 @@ def build_inv_norm_matrix(n: int, v, Lx:float, Ly:float, Lz:float, nbr_list, the
     u_h2 = qtn.rotate_vectors(q, r_h2) 
 
     # Définition de la fonction pour le calcul d'inverse des normes
-    def inv_norm(v):
-        return 1.0 / np.sqrt(np.einsum('ij,ij->i', v, v)) 
+    # def inv_norm(v):
+    #     return 1.0 / np.sqrt(np.einsum('ij,ij->i', v, v)) 
+    def inv_norm(v, eps=1e-12):
+        return 1.0 / np.sqrt(np.einsum('ij,ij->i', v, v) + eps**2)
 
     # Calcul des inverses des distances
     inv_rOO = inv_norm(r)

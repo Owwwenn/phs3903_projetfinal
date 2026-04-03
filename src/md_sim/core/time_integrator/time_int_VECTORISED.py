@@ -5,7 +5,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import numpy as np
 from scipy.spatial.transform import Rotation
-from simulation_core.potential_force.coul_LJ import build_potential_vector_force_torque_matrix
+from md_sim.core.potential_force.coul_LJ import build_potential_vector_force_torque_matrix
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
@@ -19,8 +19,8 @@ kB    = 0.831446
 T_init = 273   
 q_o = -0.8476   
 q_h = 0.4238
-N  = 10
-L  = 30
+N  = 8
+L  = 20
 ex = np.array([1.0,0.0,0.0])
 ey = np.array([0.0,1.0,0.0])
 ez = np.array([0.0,0.0,1.0])
@@ -39,8 +39,10 @@ OH_BOND   =  1
 HOH_ANGLE = 109.47      
 O_body    = np.array([0.0, 0.0, 0.0])
 angle_rad = np.radians(HOH_ANGLE / 2)
-H1_body   = np.array([ np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
-H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
+# H1_body   = np.array([ np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
+# H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
+H1_body   = np.array([0.0, np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
+H2_body   = np.array([0.0, -np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
 
 # Principal moments of inertia for SPC/E water
 I_body = np.array([1.3743, 1.9144, 0.6001])
@@ -80,6 +82,7 @@ class MDSystem:
         self.neighbor_count = None
         self.size = np.zeros(3)
         self.U = 0.0
+        self.eta = 0.0
 
 # =============================================================================
 # INITIALIZATION
@@ -182,7 +185,7 @@ def mic(dr, L):
     Returns:
         np.ndarray: Distance corrigée avec conditions périodiques
     """
-       return dr - L * np.round(dr / L)
+       return dr - np.array([L,L,L]) * np.round(dr / np.array([L,L,L]))
 
 def wrap_positions(pos, L):
     """Ramène les positions dans la boîte de simulation (conditions périodiques).
@@ -194,7 +197,7 @@ def wrap_positions(pos, L):
     Returns:
         np.ndarray: Positions corrigé dans la boîte
     """
-    return pos - L * np.floor(pos / L)
+    return pos - np.array([L,L,L]) * np.floor(pos / np.array([L,L,L]))
     # return pos - L * np.round(pos / L)
 
 # =============================================================================
