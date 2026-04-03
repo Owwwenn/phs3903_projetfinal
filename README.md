@@ -2,18 +2,34 @@
 
 Le projet consiste à simuler une centaine de molécules d'eau à leur transistion de phase liquide-gaz et gaz-liquide.
 
-<!-- ## Navigation du projet
+# Setup
+Créer une venv pour le projet.
 
-Les noms seront à changer
+### 1- Installer virtualenv
 
-`graphs`: Graphiques tracés à partir des résultats et du post-processing
-`parameters`: Paramètres 
-`post-processing`:
-`processing`:
-`results`:
-`time-evolution`:
-`visualisation`: -->
+)
+pip install virtualenv
+)
 
+### 2- Dans le dossier du projet (cd dans la bonne dir si besoin), activer la venv:
+
+Windows:
+
+)
+.\venv\Scripts\activate
+)
+
+Linux:
+
+)
+source .venv/bin/activate
+)
+
+### 3- Installer les dépendances dans la venv
+
+)
+pip install -r requirements.txt
+)
 
 # (WIP) Tâches à réaliser:
 ### Infrastucture de simulation:

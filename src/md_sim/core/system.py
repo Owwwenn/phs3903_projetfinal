@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 class MDSystem:
     """Classe représentant un système de dynamique moléculaire de molécules rigides.
@@ -115,3 +116,23 @@ def wrap_positions(pos, L):
     """
     return pos - L * np.floor(pos / L)
 
+def get_atom_positions(sys, model):
+
+    """Calcule les positions des atomes (O, H1, H2) dans le repère laboratoire.
+
+    Args:
+        sys (MDSystem): Système moléculaire
+
+    Returns:
+         Positions des atomes O, H1 et H2
+    """
+    O_lab  = np.zeros((sys.N, 3))
+    H1_lab = np.zeros((sys.N, 3))
+    H2_lab = np.zeros((sys.N, 3))
+
+    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
+    O_lab  = sys.cm_pos + R.apply(model.O_body)
+    H1_lab = sys.cm_pos + R.apply(model.H1_body)
+    H2_lab = sys.cm_pos + R.apply(model.H2_body)
+
+    return O_lab, H1_lab, H2_lab

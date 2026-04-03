@@ -3,7 +3,7 @@ from scipy.spatial.transform import Rotation
 from md_sim.core.system import MDSystem, initialize_system, mic, wrap_positions
 from md_sim.caracterisation.energy import kinetic_energy, rotational_energy
 from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
-from md_sim.core.time_integrator.time_int_VECTORISED import half_step_L, half_step_L_final, half_step_velocity, half_step_velocity_final, get_atom_positions, get_quat, full_step_position
+from md_sim.core.time_integrator.time_int_VECTORISED import half_step_L, half_step_L_final, half_step_velocity, half_step_velocity_final, get_atom_positions, full_step_quat, full_step_position
 from md_sim.models.three_site import spc_e
 
 ##
@@ -55,14 +55,14 @@ E_init = kinetic_energy(sys, model) + rotational_energy(sys, model) + sys.U
 ##
 
 for step in range(n_steps):
-    half_step_velocity(sys, dt)
-    half_step_L(sys, dt)
-    get_quat(sys, dt)
+    half_step_velocity(sys, model, dt)
+    half_step_L(sys, model, dt)
+    full_step_quat(sys, model, dt)
     full_step_position(sys, dt)
     sys.cm_pos = wrap_positions(sys.cm_pos, param.L)
     compute_forces_and_torques(sys, model, param, nbr_list)
-    half_step_velocity_final(sys, dt)
-    half_step_L_final(sys, dt)
+    half_step_velocity_final(sys, model, dt)
+    half_step_L_final(sys, model, dt)
 
 
     # === DIAGNOSTICS ===

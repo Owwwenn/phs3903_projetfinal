@@ -24,7 +24,7 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
         list: U, F, tau Arrays de potentiels, Forces et Torque
     """
     list_r = r
-    list_q = q[:, [3,0,1,2]]
+    list_q = q
     L = np.array([Lx,Ly,Lz])
 
     s = np.sin(theta/2)
