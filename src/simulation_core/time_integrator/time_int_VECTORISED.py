@@ -19,7 +19,7 @@ kB    = 0.831446
 T_init = 273   
 q_o = -0.8476   
 q_h = 0.4238
-N  = 5
+N  = 10
 L  = 30
 ex = np.array([1.0,0.0,0.0])
 ey = np.array([0.0,1.0,0.0])
@@ -194,7 +194,7 @@ def wrap_positions(pos, L):
     Returns:
         np.ndarray: Positions corrigé dans la boîte
     """
-    return pos - L * np.floor(pos / L + 0.5)
+    return pos - L * np.floor(pos / L)
     # return pos - L * np.round(pos / L)
 
 # =============================================================================
