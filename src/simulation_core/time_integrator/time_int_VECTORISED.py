@@ -5,7 +5,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import numpy as np
 from scipy.spatial.transform import Rotation
-from simulation_core.potential_force.potentiel_force import build_potential_vector_force_torque_matrix
+from simulation_core.potential_force.coul_LJ import build_potential_vector_force_torque_matrix
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
@@ -20,12 +20,13 @@ T_init = 273
 q_o = -0.8476   
 q_h = 0.4238
 N  = 2
-L  = 30
+L  = 15
 ex = np.array([1.0,0.0,0.0])
 ey = np.array([0.0,1.0,0.0])
 ez = np.array([0.0,0.0,1.0])
 sigma = 3.166
 epsilon = 0.1553
+k_coul = 1389
 
 # Collecter les positions à chaque step
 O_traj  = []
@@ -98,7 +99,8 @@ def initialize_system(N, L):
 
     # positions on cubic grid
     n_side = int(np.ceil(N**(1/3)))
-    spacing = min(L / (n_side + 1), L / 2)  # espacement entre molécules
+    # spacing = min(L / (n_side + 1), L / 2)  # espacement entre molécules
+    spacing = 4
     positions = []
     for i in range(n_side):
         for j in range(n_side):
@@ -193,6 +195,7 @@ def wrap_positions(pos, L):
         np.ndarray: Positions corrigé dans la boîte
     """
     return pos - L * np.floor(pos / L)
+    # return pos - L * np.round(pos / L)
 
 # =============================================================================
 # NEIGHBOUR LIST
@@ -283,16 +286,16 @@ def compute_forces_and_torques(sys, nbr_list):
         sys.L.flatten()
     ])
 
-    U, F = build_potential_vector_force_torque_matrix(
+    U, F, tau = build_potential_vector_force_torque_matrix(
         sys.N, v, L, L, L, nbr_list,
-        np.radians(HOH_ANGLE), OH_BOND, q_o, q_h, epsilon, sigma)
+        np.radians(HOH_ANGLE), OH_BOND, q_o, q_h, epsilon, sigma, k_coul)
     
     #print(f"F_raw sample = {F[:2]}")
 
     sys.U = np.sum(U) / 2
-    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
-    sys.force = R.apply(F[:, :3])   # body → lab
-    sys.T     = R.apply(F[:, 3:6])  # body → lab
+    # R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
+    sys.force = F
+    sys.T     = tau 
  
 # =============================================================================
 # TRANSLATIONAL INTEGRATOR
@@ -506,7 +509,7 @@ def rotational_energy(sys):
 
 
 dt = 0.0003
-n_steps = 100000
+n_steps = 30000
 s = np.zeros(n_steps)
 en = np.zeros(n_steps)
 sys = initialize_system(N, L)
