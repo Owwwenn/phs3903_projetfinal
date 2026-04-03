@@ -37,8 +37,8 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
     i_idx, j_idx = np.where(nbr_list)
 
     # Définition de r et de q
-    ri = list_r[j_idx] - list_r[i_idx]             
-    r = ri - L * np.round(ri / L)
+    r = list_r[j_idx] - list_r[i_idx]             
+    # r = ri - L * np.round(ri / L)
     q_i = qtn.from_float_array(list_q[i_idx])
     q_j = qtn.from_float_array(list_q[j_idx])
 
@@ -63,6 +63,8 @@ def build_potential_vector_force_torque_matrix(n: int, v, Lx:float, Ly:float, Lz
         rH1O, rH1H1, rH1H2, 
         rH2O, rH2H1, rH2H2
     ])
+
+    r_vec = r_vec - L * np.round(r_vec / L)
 
     eps = 1e-12
     inv_r = 1.0 / np.sqrt(np.einsum("kij,kij->ki", r_vec, r_vec) + eps**2)
