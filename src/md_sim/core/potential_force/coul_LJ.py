@@ -34,7 +34,7 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     r_h1 = r_oh * np.array([0,s,c])  
     r_h2 = r_oh * np.array([0,-s,c])  
 
-    i_idx, j_idx = np.where(nbr_list)
+    i_idx, j_idx = nbr_list
 
     # Définition de r et de q
     r = list_r[j_idx] - list_r[i_idx]             
@@ -130,6 +130,6 @@ def compute_forces_and_torques(sys, model, param, nbr_list):
         model.HOH_rad, model.OH, model.q_o, model.q_h,
         model.eps_LJ, model.sigma_LJ, param.k_coul)
     
-    sys.U = np.sum(U) / 2
+    sys.U = np.sum(U)
     sys.force = F
     sys.T     = tau
