@@ -19,11 +19,11 @@ class parameters:
         self.N = 50
         self.L = np.array([200,200,200])
         self.kB = 0.831446        
-        self.T_init = 350   
+        self.T_init = 273   
         self.T_target = 400
         self.k_coul = 1389
         self.dt = 0.0003
-        self.n_steps = 10000
+        self.n_steps = 100000
 
 param = parameters()
 model = spc_e()
@@ -82,15 +82,15 @@ for step in range(n_steps):
     E     = K + sys.U
     T     = 2 * K / (6 * N * kB)
     L_tot = sys.L.sum(axis=0)
-    qnorm = np.max(np.abs(np.linalg.norm(sys.quat, axis=1) - 1.0))
+    # qnorm = np.max(np.abs(np.linalg.norm(sys.quat, axis=1) - 1.0))
     # s[step] = step
     en[step] = E 
     U_arr[step] = sys.U
     F_norms[step] = np.linalg.norm(sys.force)
     T_norms[step] = np.linalg.norm(sys.T)
     print(f"step {step:4d} | E={E:.4f} dE={abs(E-E_init)/E_init*100:.4f}% | "
-        f"T={T:.1f}K | |L_drift|={np.linalg.norm(L_tot-L_init):.2e} | "
-        f"qnorm_err={qnorm:.2e}| sum T = {sys.T.sum(axis=0)}")
+        f"T={T:.1f}K | "
+        f"sum T = {sys.T.sum(axis=0)}")
 
     # if step % skip == 0:
     #     O, H1, H2 = get_atom_positions(sys, model)

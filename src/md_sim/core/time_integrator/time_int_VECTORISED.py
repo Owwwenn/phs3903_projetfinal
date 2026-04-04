@@ -3,6 +3,7 @@ from scipy.spatial.transform import Rotation
 from md_sim.core.system import MDSystem
 from md_sim.core.potential_force.coul_LJ import build_potential_vector_force_torque_matrix
 from md_sim.models.three_site import spc_e
+import quaternion as qtn 
 
 # import matplotlib.pyplot as plt
 # from mpl_toolkits.mplot3d import Axes3D
@@ -157,83 +158,127 @@ def half_step_L(sys, model, dt):
     sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
 
 
-def quat_mul(q, r):
-    """Multiplie deux quaternions.
+# def quat_mul(q, r):
+#     """Multiplie deux quaternions.
 
-    Args:
-        q (np.ndarray): Quaternion (N, 4)
-        r (np.ndarray): Quaternion (N, 4)
+#     Args:
+#         q (np.ndarray): Quaternion (N, 4)
+#         r (np.ndarray): Quaternion (N, 4)
 
-    Returns:
-        np.ndarray: Produit quaternion (N, 4)
-    """
-    w1, x1, y1, z1 = q.T
-    w2, x2, y2, z2 = r.T
+#     Returns:
+#         np.ndarray: Produit quaternion (N, 4)
+#     """
+#     w1, x1, y1, z1 = q.T
+#     w2, x2, y2, z2 = r.T
 
-    return np.stack([
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2
-    ], axis=1)
+#     return np.stack([
+#         w1*w2 - x1*x2 - y1*y2 - z1*z2,
+#         w1*x2 + x1*w2 + y1*z2 - z1*y2,
+#         w1*y2 - x1*z2 + y1*w2 + z1*x2,
+#         w1*z2 + x1*y2 - y1*x2 + z1*w2
+#     ], axis=1)
     
 
+# def axis_angle_to_quat(axis, angle):
+#      """Convertit une rotation angulaire en quaternion.
+
+#     Args:
+#         axis (np.ndarray): Axe de rotation (3,)
+#         angle (np.ndarray): Angle de rotation (N,)
+
+#     Returns:
+#         np.ndarray: Quaternion correspondant (N, 4)
+#     """
+#      half = 0.5 * angle
+#      s = np.sin(half)
+#      c = np.cos(half)
+
+#      return np.stack([
+#         c,
+#         axis[0]*s,
+#         axis[1]*s,
+#         axis[2]*s
+#     ], axis=1)
+
+
+# def full_step_quat(sys, model, dt):
+#     """Met à jour les quaternions via l'intégration des rotations.
+#     Args:
+#         sys (MDSystem): Système
+#         dt (float): Pas de temps
+
+#     Returns:
+#         None: Met à jour sys.quat
+#     """
+#     q = sys.quat  # (N, 4)
+#     omega = sys.L / model.I_body  # (N, 3)
+#     ex = np.array([1.0,0.0,0.0])
+#     ey = np.array([0.0,1.0,0.0])
+#     ez = np.array([0.0,0.0,1.0])
+  
+#     # rotations élémentaires 
+#     qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+#     qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
+#     qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
+#     qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
+#     qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+
+#     # application 
+#     q = quat_mul(qy1, q)
+#     q = quat_mul(qx1, q)
+#     q = quat_mul(qz,  q)
+#     q = quat_mul(qx2, q)
+#     q = quat_mul(qy2, q)
+
+#     # # normalisation 
+#     q /= np.linalg.norm(q, axis=1, keepdims=True)
+
+#     sys.quat = q
+
 def axis_angle_to_quat(axis, angle):
-     """Convertit une rotation angulaire en quaternion.
-
+    """Convertit axe + angle (N,) en array de quaternions (N,).
+    
     Args:
-        axis (np.ndarray): Axe de rotation (3,)
-        angle (np.ndarray): Angle de rotation (N,)
-
+        axis  (np.ndarray): Axe de rotation normalisé (3,)
+        angle (np.ndarray): Angles de rotation en radians (N,)
     Returns:
-        np.ndarray: Quaternion correspondant (N, 4)
+        np.ndarray: dtype=quaternion, shape (N,)
     """
-     half = 0.5 * angle
-     s = np.sin(half)
-     c = np.cos(half)
-
-     return np.stack([
-        c,
-        axis[0]*s,
-        axis[1]*s,
-        axis[2]*s
-    ], axis=1)
+    # from_rotation_vector attend des vecteurs (N, 3) = axe * angle
+    rot_vecs = np.outer(angle, axis)          # (N, 3)
+    return qtn.from_rotation_vector(rot_vecs)
 
 
 def full_step_quat(sys, model, dt):
     """Met à jour les quaternions via l'intégration des rotations.
+
     Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-
-    Returns:
-        None: Met à jour sys.quat
+        sys   (MDSystem): Système  — sys.quat doit être dtype=quaternion (N,)
+        model           : modèle   — model.I_body scalaire ou (3,)
+        dt    (float)   : Pas de temps
     """
-    q = sys.quat  # (N, 4)
-    omega = sys.L / model.I_body  # (N, 3)
-    ex = np.array([1.0,0.0,0.0])
-    ey = np.array([0.0,1.0,0.0])
-    ez = np.array([0.0,0.0,1.0])
-  
-    # rotations élémentaires 
-    qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
-    qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-    qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
-    qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-    qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+    omega = sys.L / model.I_body          # (N, 3)
 
-    # application 
-    q = quat_mul(qy1, q)
-    q = quat_mul(qx1, q)
-    q = quat_mul(qz,  q)
-    q = quat_mul(qx2, q)
-    q = quat_mul(qy2, q)
+    ex = np.array([1., 0., 0.])
+    ey = np.array([0., 1., 0.])
+    ez = np.array([0., 0., 1.])
 
-    # # normalisation 
-    q /= np.linalg.norm(q, axis=1, keepdims=True)
+    q = qtn.as_quat_array(sys.quat)
+    qy1 = axis_angle_to_quat(ey, omega[:, 1] * dt / 2)
+    qx1 = axis_angle_to_quat(ex, omega[:, 0] * dt / 2)
+    qz  = axis_angle_to_quat(ez, omega[:, 2] * dt)
+    qx2 = axis_angle_to_quat(ex, omega[:, 0] * dt / 2)
+    qy2 = axis_angle_to_quat(ey, omega[:, 1] * dt / 2)
 
-    sys.quat = q
-            
+    # Application (multiplication native)
+    q = qy1 * q
+    q = qx1 * q
+    q = qz  * q
+    q = qx2 * q
+    q = qy2 * q
+
+    # Normalisation
+    sys.quat = qtn.as_float_array(np.normalized(q))
 
 def half_step_L_final(sys, model, dt):
 

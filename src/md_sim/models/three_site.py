@@ -12,5 +12,5 @@ class spc_e:
         self.O_body = np.array([0,0,0])
         self.H1_body = self.OH * np.array([0, np.sin(self.HOH_rad), np.cos(self.HOH_rad)])
         self.H2_body = self.OH * np.array([0, -np.sin(self.HOH_rad), np.cos(self.HOH_rad)])
-        self.eps_LJ = 0.1553
+        self.eps_LJ = 15.53
         self.sigma_LJ = 3.166
