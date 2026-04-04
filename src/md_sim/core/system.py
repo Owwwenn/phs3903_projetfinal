@@ -50,22 +50,31 @@ def initialize_system(model, parameters):
     kB = parameters.kB
     mmass = model.mass
     Ix, Iy, Iz, = model.I_body
+    Lx, Ly, Lz = L
     sys = MDSystem(N)
 
     # positions on cubic grid
+    # n_side = int(np.ceil(N**(1/3)))
+    # # spacing = min(L / (n_side + 1), L / 2)  # espacement entre molécules
+    # spacing = 4
+    # positions = []
+    # for i in range(n_side):
+    #     for j in range(n_side):
+    #         for k in range(n_side):
+    #             positions.append([
+    #                 (i + 1) * spacing,
+    #                 (j + 1) * spacing,
+    #                 (k + 1) * spacing
+    #             ])
     n_side = int(np.ceil(N**(1/3)))
-    # spacing = min(L / (n_side + 1), L / 2)  # espacement entre molécules
-    spacing = 4
-    positions = []
-    for i in range(n_side):
-        for j in range(n_side):
-            for k in range(n_side):
-                positions.append([
-                    (i + 1) * spacing,
-                    (j + 1) * spacing,
-                    (k + 1) * spacing
-                ])
-    sys.cm_pos = np.array(positions[:N])
+    xs = np.linspace(-Lx/2, Lx/2, n_side, endpoint=False)
+    ys = np.linspace(-Ly/2, Ly/2, n_side, endpoint=False)
+    zs = np.linspace(-Lz/2, Lz/2, n_side, endpoint=False)
+
+    sys.cm_pos = np.array([[x, y, z] 
+                        for x in xs 
+                        for y in ys 
+                        for z in zs])[:N]
 
     # random velocities from Maxwell-Boltzmann
     std_dev = np.sqrt(kB * T_init / mmass)
