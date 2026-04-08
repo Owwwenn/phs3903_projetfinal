@@ -4,7 +4,7 @@ from scipy.spatial.transform import Rotation
 from md_sim.core.system import mic
 from md_sim.core.neighbour_list.neighbour_list import build_nl_pairs_cells
 
-def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
+def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, z_cm: float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
     """Calcule les potentiels, forces, torques pour une molécule à trois site donné, avec Coulomb et LJ.
 
     Args:
@@ -33,8 +33,10 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     c = np.cos(theta/2)
  
     # Définition des positions des sites hydrogènes dans le repère de la molécule
-    r_h1 = r_oh * np.array([0,s,c])  
-    r_h2 = r_oh * np.array([0,-s,c])  
+    r_cm = np.array([0,0,z_cm])
+    r_o = r_oh * np.array([0,0,0]) - r_cm
+    r_h1 = r_oh * np.array([0,s,c]) - r_cm 
+    r_h2 = r_oh * np.array([0,-s,c]) - r_cm 
 
     # Neighbour lists
     nbr_list1, nbr_list2 = nbr_list
@@ -48,20 +50,26 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     rw_LJ = ri_LJ - L * np.round(ri_LJ / L)
     q_i = qtn.from_float_array(list_q[i_idx])
     q_j = qtn.from_float_array(list_q[j_idx])
+    q_i_LJ = qtn.from_float_array(list_q[i_LJ])
+    q_j_LJ = qtn.from_float_array(list_q[j_LJ])
 
     # Définition des vecteurs dans le repère monde
+    u_o = qtn.rotate_vectors(q_i, r_o)
     u_h1 = qtn.rotate_vectors(q_i, r_h1) 
     u_h2 = qtn.rotate_vectors(q_i, r_h2) 
+    v_o = qtn.rotate_vectors(q_j, r_o)
     v_h1 = qtn.rotate_vectors(q_j, r_h1) 
     v_h2 = qtn.rotate_vectors(q_j, r_h2) 
+    u_o_LJ = qtn.rotate_vectors(q_i_LJ, r_o)
+    v_o_LJ = qtn.rotate_vectors(q_j_LJ, r_o)
 
-    rOO = rw
-    rOH1 = rw + v_h1
-    rOH2 = rw + v_h2
-    rH1O = rw - u_h1
+    rOO = rw - u_o + v_o
+    rOH1 = rw - u_o + v_h1
+    rOH2 = rw - u_o + v_h2
+    rH1O = rw - u_h1 + v_o
     rH1H1 = rw - u_h1 + v_h1
     rH1H2 = rw - u_h1 + v_h2
-    rH2O = rw - u_h2
+    rH2O = rw - u_h2 + v_o
     rH2H1 = rw - u_h2 + v_h1
     rH2H2 = rw - u_h2 + v_h2
 
@@ -70,6 +78,8 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
         rH1O, rH1H1, rH1H2, 
         rH2O, rH2H1, rH2H2
     ])
+    
+    rw_LJ = rw_LJ - u_o_LJ + v_o_LJ
 
     # r_vec = r_vec - L * np.round(r_vec / L)
 
@@ -90,7 +100,7 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
         2 * sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6
     ) * inv_r_LJ**2
     u_LJ = 4 * eps_LJ * np.sum(sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6)
-    F_LJ = (lj_scalar[:, None]) * rw_LJ
+    F_LJ = -(lj_scalar[:, None]) * rw_LJ
     
     # Potentials
     u_pair = (
@@ -115,6 +125,10 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     # Torques
     tau = np.zeros((n, 3))
 
+    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[0]))
+    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[1]))
+    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[2]))
+
     np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[3]))
     np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[4]))
     np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[5]))
@@ -122,6 +136,10 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[6]))
     np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[7]))
     np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[8]))
+
+    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[0]))
+    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[3]))
+    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[6]))
 
     np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[1]))
     np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[4]))
@@ -147,7 +165,7 @@ def compute_forces_and_torques(sys, model, param, nbr_list):
     
     U, F, tau = build_potential_vector_force_torque_matrix(
         sys.N, sys.cm_pos, sys.quat, Lx, Ly, Lz, nbr_list, 
-        model.HOH_rad, model.OH, model.q_o, model.q_h,
+        model.HOH_rad, model.z_cm, model.OH, model.q_o, model.q_h,
         model.eps_LJ, model.sigma_LJ, param.k_coul)
     
     sys.U = np.sum(U)
