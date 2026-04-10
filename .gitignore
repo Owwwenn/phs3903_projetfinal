@@ -1,3 +1,4 @@
 __pycache__/
 .venv/
 test_notebooks/
+src/md_sim.egg-info/
