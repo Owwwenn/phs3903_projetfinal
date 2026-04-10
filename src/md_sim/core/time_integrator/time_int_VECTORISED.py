@@ -261,46 +261,46 @@ def full_step_quat(sys, model, dt):
         None: Met à jour sys.quat
     """
     
-    omega = sys.L / model.I_body          # body-frame ω at t+Dt/2
-    omega_norm = np.linalg.norm(omega, axis=1, keepdims=True)
+    # omega = sys.L / model.I_body          # body-frame ω at t+Dt/2
+    # omega_norm = np.linalg.norm(omega, axis=1, keepdims=True)
     
-    half_angle = 0.5 * dt * omega_norm
+    # half_angle = 0.5 * dt * omega_norm
     
-    # safe sinc to avoid division by zero
-    sinc = np.where(omega_norm > 1e-10,
-                    np.sin(half_angle) / omega_norm,
-                    0.5 * dt * np.ones_like(omega_norm))
+    # # safe sinc to avoid division by zero
+    # sinc = np.where(omega_norm > 1e-10,
+    #                 np.sin(half_angle) / omega_norm,
+    #                 0.5 * dt * np.ones_like(omega_norm))
     
-    dq = np.concatenate([np.cos(half_angle), sinc * omega], axis=1)
+    # dq = np.concatenate([np.cos(half_angle), sinc * omega], axis=1)
     
-    sys.quat = quat_mul(dq, sys.quat)
-    sys.quat /= np.linalg.norm(sys.quat, axis=1, keepdims=True)
+    # sys.quat = quat_mul(dq, sys.quat)
+    # sys.quat /= np.linalg.norm(sys.quat, axis=1, keepdims=True)
     
   
-    # q = sys.quat  # (N, 4)
-    # omega = sys.L / model.I_body  # (N, 3)
-    # ex = np.array([1.0,0.0,0.0])
-    # ey = np.array([0.0,1.0,0.0])
-    # ez = np.array([0.0,0.0,1.0])
+    q = sys.quat  # (N, 4)     
+    omega = sys.L / model.I_body  # (N, 3)
+    ex = np.array([1.0,0.0,0.0])
+    ey = np.array([0.0,1.0,0.0])
+    ez = np.array([0.0,0.0,1.0])
   
-    # # rotations élémentaires 
-    # qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
-    # qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-    # qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
-    # qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-    # qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+    # rotations élémentaires 
+    qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+    qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
+    qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
+    qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
+    qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
 
-    # # application 
-    # q = quat_mul(qy1, q)
-    # q = quat_mul(qx1, q)
-    # q = quat_mul(qz,  q)
-    # q = quat_mul(qx2, q)
-    # q = quat_mul(qy2, q)
+    # application 
+    q = quat_mul(q, qy1)
+    q = quat_mul(q, qx1)
+    q = quat_mul(q, qz)
+    q = quat_mul(q, qx2)
+    q = quat_mul(q, qy2)
 
-    # # # normalisation 
-    # q /= np.linalg.norm(q, axis=1, keepdims=True)
+    # # normalisation 
+    q /= np.linalg.norm(q, axis=1, keepdims=True)
 
-    # sys.quat = q
+    sys.quat = q
     
 
 def half_step_L_final(sys, model, dt):
