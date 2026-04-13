@@ -4,7 +4,7 @@ from scipy.spatial.transform import Rotation
 from md_sim.core.system import mic
 from md_sim.core.neighbour_list.neighbour_list import build_nl_pairs_cells
 
-def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, z_cm: float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
+def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, z_cm: float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float, F_cap: float, tau_cap: float):
     """Calcule les potentiels, forces, torques pour une molécule à trois site donné, avec Coulomb et LJ.
 
     Args:
@@ -79,14 +79,12 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
         rH2O, rH2H1, rH2H2
     ])
     
-    rw_LJ = rw_LJ - u_o_LJ + v_o_LJ
+    rw_LJ = ri_LJ - u_o_LJ + v_o_LJ
+    # rw_LJ = ri_LJ - L * np.round(ri_LJ / L)
+    r_vec = r_vec - L * np.round(r_vec / L)
 
-    # r_vec = r_vec - L * np.round(r_vec / L)
-
-    eps = 1e-12
-    # eps = 0.5*sigma_LJ
-    inv_r = 1.0 / np.sqrt(np.einsum("kij,kij->ki", r_vec, r_vec) + eps**2)
-    inv_r_LJ = 1.0 / np.sqrt(np.einsum("ij,ij->i", rw_LJ, rw_LJ) + eps**2)
+    inv_r = 1.0 / np.sqrt(np.einsum("kij,kij->ki", r_vec, r_vec))
+    inv_r_LJ = 1.0 / np.sqrt(np.einsum("ij,ij->i", rw_LJ, rw_LJ))
 
     # Coulomb 
     q_left  = np.array([q_o]*3 + [q_h]*6)
@@ -96,11 +94,12 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
 
     # # LJ 
     sig6  = sigma_LJ**6; sig12 = sig6**2
+    invLJ6 = inv_r_LJ**6; invLJ12 = invLJ6**2
     lj_scalar = 24 * eps_LJ * (
-        2 * sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6
+        2 * sig12 * invLJ12 - sig6 * invLJ6
     ) * inv_r_LJ**2
-    u_LJ = 4 * eps_LJ * np.sum(sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6)
-    F_LJ = -(lj_scalar[:, None]) * rw_LJ
+    u_LJ = 4 * eps_LJ * sig12 * invLJ12 - sig6 * invLJ6
+    F_LJ = (lj_scalar[:, None]) * rw_LJ
     
     # Potentials
     u_pair = (
@@ -116,38 +115,36 @@ def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float,
     # Forces
     F_pair = prefactor[:, :, None] * r_vec        # (9, N_pairs, 3)
     F = np.zeros((n, 3))
-    for k in range(9):
-        np.add.at(F, i_idx,  F_pair[k])
-        np.add.at(F, j_idx, -F_pair[k])
+    F_i = F_pair.sum(axis=0)
+    np.add.at(F, i_idx, F_i)
+    np.add.at(F, j_idx, -F_i)
     np.add.at(F, i_LJ,  F_LJ)
     np.add.at(F, j_LJ, -F_LJ)
-    
+
+    F_norm = np.linalg.norm(F, axis=1, keepdims=True)
+    mask = (F_norm > F_cap).squeeze()
+    F[mask] = F[mask] / F_norm[mask] * F_cap
+
     # Torques
     tau = np.zeros((n, 3))
 
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[0]))
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[1]))
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[2]))
+    tau_i = (
+        np.cross(u_o,  F_pair[0] + F_pair[1] + F_pair[2]) +
+        np.cross(u_h1, F_pair[3] + F_pair[4] + F_pair[5]) +
+        np.cross(u_h2, F_pair[6] + F_pair[7] + F_pair[8])
+    )
+    np.add.at(tau, i_idx, tau_i)
 
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[3]))
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[4]))
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[5]))
-
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[6]))
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[7]))
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[8]))
-
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[0]))
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[3]))
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[6]))
-
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[1]))
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[4]))
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[7]))
-
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[2]))
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[5]))
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[8]))
+    tau_j = (
+        np.cross(v_o,  -(F_pair[0] + F_pair[3] + F_pair[6])) +
+        np.cross(v_h1, -(F_pair[1] + F_pair[4] + F_pair[7])) +
+        np.cross(v_h2, -(F_pair[2] + F_pair[5] + F_pair[8]))
+    )
+    np.add.at(tau, j_idx, tau_j)
+    
+    tau_norm = np.linalg.norm(tau, axis=1, keepdims=True)
+    mask = (tau_norm > tau_cap).squeeze()
+    tau[mask] = tau[mask] / tau_norm[mask] * tau_cap
 
     return U, F, tau
 
@@ -162,11 +159,11 @@ def compute_forces_and_torques(sys, model, param, nbr_list):
         None: Met à jour sys.force et sys.T
     """
     Lx, Ly, Lz = param.L
-    
+
     U, F, tau = build_potential_vector_force_torque_matrix(
         sys.N, sys.cm_pos, sys.quat, Lx, Ly, Lz, nbr_list, 
         model.HOH_rad, model.z_cm, model.OH, model.q_o, model.q_h,
-        model.eps_LJ, model.sigma_LJ, param.k_coul)
+        model.eps_LJ, model.sigma_LJ, param.k_coul, param.F_cap, param.tau_cap)
     
     sys.U = np.sum(U)
     sys.force = F

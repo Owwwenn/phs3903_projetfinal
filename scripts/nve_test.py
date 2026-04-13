@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from scipy.spatial.transform import Rotation
 from md_sim.core.system import MDSystem, initialize_system, mic, wrap_positions, get_atom_positions
 from md_sim.caracterisation.energy import kinetic_energy, rotational_energy
@@ -15,25 +16,28 @@ import matplotlib.animation as animation
 # Init
 ##
 
+model = spc_e()
+
 class parameters:
     def __init__(self):
         self.N = 100
-        self.L = np.array([30, 30, 30])
+        self.L = np.array([25, 25, 25])
         # self.L = np.array([self.N/3, self.N/3, self.N/3])
         self.kB = 0.831446        
-        self.T_init = 300   
+        self.T_init = 100   
         self.T_target = 300
         self.k_coul = 138.9
-        self.dt = 0.003
+        self.dt = 0.001
         self.N_r = 10
-        self.r_c = 10.0
-        self.r_s = 1.0
-        self.r_c_LJ = 3.0
-        self.r_s_LJ = 0.3
-        self.n_steps = 5000
+        self.r_c = 12.0
+        self.r_s = 0.5
+        self.r_c_LJ = 0.0
+        self.r_s_LJ = 0.0
+        self.n_steps = 10000
+        self.F_cap = 24*model.eps_LJ * (2 * (model.sigma_LJ/3)**12 - (model.sigma_LJ/3)**6) * 1/3**2
+        self.tau_cap = 3 * self.F_cap
 
 param = parameters()
-model = spc_e()
 
 n_steps = param.n_steps
 N = param.N
@@ -55,7 +59,7 @@ sys.cm_pos = wrap_positions(sys.cm_pos, param.L)
 sys.quat = Rotation.random(N).as_quat()[:, [3,0,1,2]]
 sys.eta = 0.0
 
-pos_init   = sys.cm_pos.copy()
+pos_init = sys.cm_pos.copy()
 L_init     = sys.L.sum(axis=0).copy()
 U_arr = np.zeros(n_steps)
 
@@ -69,7 +73,7 @@ F_norms = np.zeros(n_steps)
 T_norms = np.zeros(n_steps)
 
 compute_forces_and_torques(sys, model, param, nbr_list)
-E_init = kinetic_energy(sys, model) + rotational_energy(sys, model) + sys.U
+E_init = kinetic_energy(sys, model) + sys.U + rotational_energy(sys, model)
 
 ##
 # Solve
@@ -77,6 +81,7 @@ E_init = kinetic_energy(sys, model) + rotational_energy(sys, model) + sys.U
 
 for step in range(n_steps):
     # === DIAGNOSTICS ===
+    start_step = time.time()
     K = kinetic_energy(sys, model) + rotational_energy(sys, model)
     E     = K + sys.U
     T     = 2 * K / (6 * N * kB)
@@ -92,10 +97,12 @@ for step in range(n_steps):
     L_spin    = sys.T.sum(axis=0)
     print(f"step {step:4d} | E={E:.4f} dE={abs(E-E_init)/E_init*100:.4f}% | "
         f"T={T:.1f}K | ",
+        f"U={sys.U:.3f}",
+        f"K={K:.3f}",
         f"sum F = {sys.force.sum(axis=0)}",
         f"sum L = {L_orbital + L_spin}",
-        f"sum T = {sys.T.sum(axis=0)}")
-    sys.r_last = sys.cm_pos.copy()
+        f"sum T = {sys.T.sum(axis=0)}"
+        )
 
     half_step_velocity(sys, model, dt)
     half_step_L(sys, model, dt)
@@ -103,21 +110,27 @@ for step in range(n_steps):
     full_step_position(sys, dt)
     sys.cm_pos = wrap_positions(sys.cm_pos, param.L)
     if step % param.N_r == 0:
+        sys.r_last = sys.cm_pos.copy()
         if def_rebuild(sys, param.L, param.r_s):
             nbr_list[0] = build_nl_pairs_cells(sys, param.r_c, param.r_s, param.L)
         if def_rebuild(sys, param.L, param.r_s_LJ):
             nbr_list[1] = build_nl_pairs_cells(sys, param.r_c_LJ, param.r_s_LJ, param.L)
+    start_force = time.time()
     compute_forces_and_torques(sys, model, param, nbr_list)
+    time_force = time.time() - start_force
     half_step_velocity_final(sys, model, dt)
     half_step_L_final(sys, model, dt)
     # update_eta(sys, model, param, N, dt)
     # update_PL(sys, dt)
+
 
     if step % skip == 0:
         O, H1, H2 = get_atom_positions(sys, model)
         O_traj.append(O.copy())
         H1_traj.append(H1.copy())
         H2_traj.append(H2.copy())
+    
+    print(f"Temps du step: {time.time()-start_step}", f"Temps des forces {time_force}")
 
 
 fig_anim = plt.figure(figsize=(7, 7))
