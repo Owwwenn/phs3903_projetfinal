@@ -1,538 +1,128 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-from md_sim.core.system import MDSystem
-from md_sim.core.potential_force.coul_LJ import build_potential_vector_force_torque_matrix
-from md_sim.models.three_site import spc_e
-import quaternion as qtn 
-
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.animation as animation
-
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-# mmass = 18.015         
-# kB    = 0.831446        
-# T_init = 273   
-# q_o = -0.8476   
-# q_h = 0.4238
-# N  = 2
-# L  = 30
-# ex = np.array([1.0,0.0,0.0])
-# ey = np.array([0.0,1.0,0.0])
-# ez = np.array([0.0,0.0,1.0])
-# sigma = 3.166
-# epsilon = 0.1553
-# k_coul = 1389
-
-# # Collecter les positions à chaque step
-# O_traj  = []
-# H1_traj = []
-# H2_traj = []
-# skip = 10
-
-# # SPC/E geometry in body frame
-# OH_BOND   =  1   
-# HOH_ANGLE = 109.47      
-# O_body    = np.array([0.0, 0.0, 0.0])
-# angle_rad = np.radians(HOH_ANGLE / 2)
-# # H1_body   = np.array([ np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
-# # H2_body   = np.array([-np.sin(angle_rad), -np.cos(angle_rad), 0.0]) * OH_BOND
-# H1_body   = np.array([0.0, np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
-# H2_body   = np.array([0.0, -np.sin(angle_rad), np.cos(angle_rad)]) * OH_BOND
-
-# # Principal moments of inertia for SPC/E water
-# I_body = np.array([1.3743, 1.9144, 0.6001])
-# i1, i2, i3 = I_body
-
-# =============================================================================
-# SYSTEM CLASS
-# =============================================================================
-class MDSystem:
-    """Classe représentant un système de dynamique moléculaire de molécules rigides.
-
-    Attributs:
-        N (int): Nombre de molécules
-        cm_pos (np.ndarray): Positions des centres de masse (N, 3)
-        cm_vel (np.ndarray): Vitesses des centres de masse (N, 3)
-        force (np.ndarray): Forces appliquées sur les centres de masse (N, 3)
-        L (np.ndarray): Moments cinétiques angulaires dans ref lab(N, 3)
-        T (np.ndarray): Couples (torques) appliqués dans ref lab (N, 3)
-        quat (np.ndarray): Quaternions d’orientation (N, 4)
-        r_last (np.ndarray): Positions lors du dernier rebuild de neighbour list
-        neighbor_list: Liste des voisins, matrice de 0 et de 1 
-        neighbor_count: Nombre de voisins
-        size (np.ndarray): Taille de la boîte de simulation
-    """
-    def __init__(self, N):
-        self.N       = N
-        self.cm_pos  = np.zeros((N, 3))   # 
-        self.cm_vel  = np.zeros((N, 3))   # 
-        self.force   = np.zeros((N, 3))   # 
-        self.L       = np.zeros((N, 3))   #
-        self.T       = np.zeros((N, 3))   # 
-        self.quat    = np.zeros((N, 4))   # 
-        self.quat[:, 0] = 1.0             # 
-        self.r_last = np.zeros((N, 3))
-        self.neighbor_list = None
-        self.neighbor_count = None
-        self.size = np.zeros(3)
-        self.U = 0.0
-        self.eta = 0.0
- 
-# =============================================================================
-# TRANSLATIONAL INTEGRATOR
-# =============================================================================
-def half_step_velocity(sys, model, dt):
-    """Effectue un demi-pas de vitesse (Velocity Verlet).
-
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-    """
-    sys.cm_vel += 0.5 * (sys.force / model.mass) * dt
-
-def full_step_position(sys, dt):
-    """Met à jour les positions sur un pas complet.
-
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-    """
-    sys.cm_pos += sys.cm_vel * dt
-    
-
-def half_step_velocity_final(sys, model, dt):
-    """Effectue le second demi-pas de vitesse.
-
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-    """ 
-    sys.cm_vel += 0.5 * (sys.force / model.mass) * dt
-
-# =============================================================================
-# ROTATIONAL INTEGRATOR
-# =============================================================================
-def half_step_L(sys, model, dt):
-    """Effectue un demi-pas sur le moment cinétique angulaire.
-
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-    """
-    #  Lab a body frame torque
-    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
-    T_body = R.inv().apply(sys.T)
-    i1, i2, i3 = model.I_body
-
-    #  Half-step torque update
-    sys.L += 0.5 * dt * T_body
-
-    # Ry rotation
-    Lx, Ly, Lz = sys.L.T
-
-    alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
-    c = np.cos(alpha)
-    s = np.sin(alpha)
-
-    Lx_new =  c * Lx + s * Lz
-    Ly_new =  Ly
-    Lz_new = -s * Lx + c * Lz
-
-    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
-
-    #  Rx rotation
-    Lx, Ly, Lz = sys.L.T
-
-    beta = (dt / 2) * (1/i3 - 1/i1) * Lx
-    c = np.cos(beta)
-    s = np.sin(beta)
-
-    Lx_new = Lx
-    Ly_new =  c * Ly - s * Lz
-    Lz_new =  s * Ly + c * Lz
-
-    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
-
-
+from core.system import SPCE
+from core.potential_force.coul_LJ import compute_forces_and_torques
+# ─────────────────────────────────────────────
+#  Quaternion helpers
+# ─────────────────────────────────────────────
 def quat_mul(q, r):
-    """Multiplie deux quaternions.
-
-    Args:
-        q (np.ndarray): Quaternion (N, 4)
-        r (np.ndarray): Quaternion (N, 4)
-
-    Returns:
-        np.ndarray: Produit quaternion (N, 4)
-    """
-    w1, x1, y1, z1 = q.T
-    w2, x2, y2, z2 = r.T
-
+    """Hamilton product, both (N,4) [w,x,y,z]."""
+    w1,x1,y1,z1 = q.T
+    w2,x2,y2,z2 = r.T
     return np.stack([
         w1*w2 - x1*x2 - y1*y2 - z1*z2,
         w1*x2 + x1*w2 + y1*z2 - z1*y2,
         w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2
-    ], axis=1)
-    
-
-def axis_angle_to_quat(axis, angle):
-     """Convertit une rotation angulaire en quaternion.
-
-    Args:
-        axis (np.ndarray): Axe de rotation (3,)
-        angle (np.ndarray): Angle de rotation (N,)
-
-    Returns:
-        np.ndarray: Quaternion correspondant (N, 4)
-    """
-     half = 0.5 * angle
-     s = np.sin(half)
-     c = np.cos(half)
-
-     return np.stack([
-        c,
-        axis[0]*s,
-        axis[1]*s,
-        axis[2]*s
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
     ], axis=1)
 
+def axis_angle_to_quat(axis, angles):
+    """axis (3,), angles (N,) → (N,4) [w,x,y,z]."""
+    h = 0.5 * angles
+    s = np.sin(h)
+    c = np.cos(h)
+    return np.stack([c, axis[0]*s, axis[1]*s, axis[2]*s], axis=1)
 
-# def full_step_quat(sys, model, dt):
-#     """Met à jour les quaternions via l'intégration des rotations.
-#     Args:
-#         sys (MDSystem): Système
-#         dt (float): Pas de temps
+# ─────────────────────────────────────────────
+#  Rotational integrator  (symplectic, fixed order)
+# ─────────────────────────────────────────────
+def half_step_L(L_ang, tau_body, dt):
+    """First half-step: L += 0.5*dt*tau, then free Euler rotation."""
+    L_ang = L_ang + 0.5 * dt * tau_body
+    return _free_rotor_half(L_ang, dt)
 
-#     Returns:
-#         None: Met à jour sys.quat
-#     """
-#     q = sys.quat  # (N, 4)
-#     omega = sys.L / model.I_body  # (N, 3)
-#     ex = np.array([1.0,0.0,0.0])
-#     ey = np.array([0.0,1.0,0.0])
-#     ez = np.array([0.0,0.0,1.0])
-  
-#     # rotations élémentaires 
-#     qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
-#     qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-#     qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
-#     qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
-#     qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
+def half_step_L_final(L_ang, tau_body, dt):
+    """Second half-step: free Euler rotation (reversed), then L += 0.5*dt*tau."""
+    L_ang = _free_rotor_half_inv(L_ang, dt)
+    L_ang = L_ang + 0.5 * dt * tau_body
+    return L_ang
 
-#     # application 
-#     q = quat_mul(qy1, q)
-#     q = quat_mul(qx1, q)
-#     q = quat_mul(qz,  q)
-#     q = quat_mul(qx2, q)
-#     q = quat_mul(qy2, q)
+def _free_rotor_half(L, dt, I1=None, I2=None, I3=None):
+    """Ry(dt/2) then Rx(dt/2) free rotation of angular momentum."""
+    if I1 is None: I1, I2, I3 = SPCE['I_body']
+    Lx, Ly, Lz = L.T
+    # Ry
+    a  = (dt/2) * (1/I3 - 1/I2) * Ly
+    ca, sa = np.cos(a), np.sin(a)
+    Lx, Lz = ca*Lx + sa*Lz, -sa*Lx + ca*Lz
+    # Rx
+    b  = (dt/2) * (1/I3 - 1/I1) * Lx
+    cb, sb = np.cos(b), np.sin(b)
+    Ly, Lz = cb*Ly - sb*Lz, sb*Ly + cb*Lz
+    return np.stack([Lx, Ly, Lz], axis=1)
 
-#     # # normalisation 
-#     q /= np.linalg.norm(q, axis=1, keepdims=True)
+def _free_rotor_half_inv(L, dt, I1=None, I2=None, I3=None):
+    """Inverse of _free_rotor_half: Rx then Ry (reversed order)."""
+    if I1 is None: I1, I2, I3 = SPCE['I_body']
+    Lx, Ly, Lz = L.T
+    # Rx inverse
+    b  = (dt/2) * (1/I3 - 1/I1) * Lx
+    cb, sb = np.cos(b), np.sin(b)
+    Ly, Lz = cb*Ly + sb*Lz, -sb*Ly + cb*Lz
+    # Ry inverse
+    a  = (dt/2) * (1/I3 - 1/I2) * Ly
+    ca, sa = np.cos(a), np.sin(a)
+    Lx, Lz = ca*Lx - sa*Lz, sa*Lx + ca*Lz
+    return np.stack([Lx, Ly, Lz], axis=1)
 
-#     sys.quat = q
-
-# def axis_angle_to_quat(axis, angle):
-#     """Convertit axe + angle (N,) en array de quaternions (N,).
-    
-#     Args:
-#         axis  (np.ndarray): Axe de rotation normalisé (3,)
-#         angle (np.ndarray): Angles de rotation en radians (N,)
-#     Returns:
-#         np.ndarray: dtype=quaternion, shape (N,)
-#     """
-#     # from_rotation_vector attend des vecteurs (N, 3) = axe * angle
-#     rot_vecs = np.outer(angle, axis)          # (N, 3)
-#     return qtn.from_rotation_vector(rot_vecs)
-
-
-def full_step_quat(sys, model, dt):
-
-    """Met à jour les quaternions via l'intégration des rotations.
-
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-
-    Returns:
-        None: Met à jour sys.quat
+def full_step_quat(quats, L_body, I_body, dt):
     """
-    
-    # omega = sys.L / model.I_body          # body-frame ω at t+Dt/2
-    # omega_norm = np.linalg.norm(omega, axis=1, keepdims=True)
-    
-    # half_angle = 0.5 * dt * omega_norm
-    
-    # # safe sinc to avoid division by zero
-    # sinc = np.where(omega_norm > 1e-10,
-    #                 np.sin(half_angle) / omega_norm,
-    #                 0.5 * dt * np.ones_like(omega_norm))
-    
-    # dq = np.concatenate([np.cos(half_angle), sinc * omega], axis=1)
-    
-    # sys.quat = quat_mul(dq, sys.quat)
-    # sys.quat /= np.linalg.norm(sys.quat, axis=1, keepdims=True)
-    
-  
-    q = sys.quat  # (N, 4)     
-    omega = sys.L / model.I_body  # (N, 3)
-    ex = np.array([1.0,0.0,0.0])
-    ey = np.array([0.0,1.0,0.0])
-    ez = np.array([0.0,0.0,1.0])
-  
-    # rotations élémentaires 
+    Advance quaternions by dt using body-frame angular velocity ω = L/I.
+    Symmetric Euler: Ry(dt/2) Rx(dt/2) Rz(dt) Rx(dt/2) Ry(dt/2)
+    """
+    ex = np.array([1.,0.,0.])
+    ey = np.array([0.,1.,0.])
+    ez = np.array([0.,0.,1.])
+    omega = L_body / I_body   # (N,3)
+
     qy1 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
     qx1 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
     qz  = axis_angle_to_quat(ez, omega[:,2] * dt)
     qx2 = axis_angle_to_quat(ex, omega[:,0] * dt/2)
     qy2 = axis_angle_to_quat(ey, omega[:,1] * dt/2)
 
-    # application 
+    q = quats
     q = quat_mul(q, qy1)
     q = quat_mul(q, qx1)
     q = quat_mul(q, qz)
     q = quat_mul(q, qx2)
     q = quat_mul(q, qy2)
+    q /= np.linalg.norm(q, axis=1, keepdims=True)   # renormalise
+    return q
 
-    # # normalisation 
-    q /= np.linalg.norm(q, axis=1, keepdims=True)
+def world_to_body(quats, v_world):
+    """Rotate world-frame vectors to body frame using inverse quaternion."""
+    R = Rotation.from_quat(quats[:, [1,2,3,0]])
+    return R.inv().apply(v_world)
 
-    sys.quat = q
-    
+# ─────────────────────────────────────────────
+#  Full Velocity Verlet step (translation + rotation)
+# ─────────────────────────────────────────────
+def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
+                          I_body, L_box, p, dt, nbr_list):
+    n = len(cm_pos)
 
-def half_step_L_final(sys, model, dt):
+    # --- 1. Half-step translations ---
+    cm_vel = cm_vel + 0.5 * dt * forces / mass
 
-    """Effectue le second demi-pas du moment cinétique angulaire.
+    # --- 2. Half-step rotation (L, then free rotor) ---
+    tau_body = world_to_body(quats, tau)
+    L_body   = half_step_L(L_body, tau_body, dt)
 
-    Args:
-        sys (MDSystem): Système
-        dt (float): Pas de temps
-    """
-    #Lab a body frame torque 
-    i1, i2, i3 = model.I_body
+    # --- 3. Full-step positions ---
+    cm_pos = (cm_pos + dt * cm_vel) % L_box
 
-    # Rx rotation
-    Lx, Ly, Lz = sys.L.T
+    # --- 4. Full-step quaternions ---
+    quats = full_step_quat(quats, L_body, I_body, dt)
 
-    beta = (dt / 2) * (1/i3 - 1/i1) * Lx
-    c = np.cos(beta)
-    s = np.sin(beta)
+    # --- 5. Recompute forces and torques ---
+    forces, tau, pe = compute_forces_and_torques(n, cm_pos, quats, L_box, nbr_list, p)
 
-    Lx_new = Lx
-    Ly_new =  c * Ly - s * Lz
-    Lz_new =  s * Ly + c * Lz
+    # --- 6. Second half-step translations ---
+    cm_vel = cm_vel + 0.5 * dt * forces / mass
 
-    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
+    # --- 7. Second half-step rotation (reverse free rotor, then L) ---
+    tau_body = world_to_body(quats, tau)
+    L_body   = half_step_L_final(L_body, tau_body, dt)
 
-    # Ry rotation
-    Lx, Ly, Lz = sys.L.T
-
-    alpha = (dt / 2) * (1/i3 - 1/i2) * Ly
-    c = np.cos(alpha)
-    s = np.sin(alpha)
-
-    Lx_new =  c * Lx + s * Lz
-    Ly_new =  Ly
-    Lz_new = -s * Lx + c * Lz
-
-    sys.L = np.stack((Lx_new, Ly_new, Lz_new), axis=1)
-
-    # --- 4. Second half-step torque ---
-    R = Rotation.from_quat(sys.quat[:, [1,2,3,0]])
-    T_body = R.inv().apply(sys.T)
-    sys.L += 0.5 * dt * T_body
-
-
-# =============================================================================
-# MAIN
-# =============================================================================
-
-if __name__ == "__main__":
-    dt = 0.0003
-    n_steps = 30000
-    s = np.zeros(n_steps)
-    en = np.zeros(n_steps)
-    sys = initialize_system(N, L)
-    sys.cm_pos = wrap_positions(sys.cm_pos, L)
-    sys.quat = np.roll(Rotation.random(N).as_quat(), 1, axis=1)
-
-    dist_OO   = np.zeros(n_steps)
-    dist_OH1  = np.zeros(n_steps)
-    dist_OH2  = np.zeros(n_steps)
-    dist_H1H2 = np.zeros(n_steps)
-    dist_H1O  = np.zeros(n_steps)
-    dist_H2O  = np.zeros(n_steps)
-    dist_H1H1 = np.zeros(n_steps)
-    dist_H2H2 = np.zeros(n_steps)
-    dist_H1H2b= np.zeros(n_steps)
-
-    pos_init   = sys.cm_pos.copy()
-    L_init     = sys.L.sum(axis=0).copy()
-    U_arr = np.zeros(n_steps)
-
-    r_cut = 10.0   # cut-off radius (Å)
-    skin  = 4.0    # skin pour neighbour list
-    sys.r_last = sys.cm_pos.copy()
-    nbr_list = np.ones((N,N))- np.eye(N) #build_nl(sys, r_cut, skin, L)  # initial neighbour list
-
-    F_norms = np.zeros(n_steps)
-    T_norms = np.zeros(n_steps)
-
-    compute_forces_and_torques(sys, nbr_list)
-    E_init     = kinetic_energy(sys) + rotational_energy(sys) + sys.U
-
-
-    for step in range(n_steps):
-        #if def_rebuild(sys, L, skin):
-        # nbr_list = build_nl(sys, r_cut, skin, L)
-            #sys.r_last = sys.cm_pos.copy()
-
-
-        # half_step_velocity(sys, dt)
-        # half_step_L(sys, dt)
-        # full_step_quat(sys, dt)
-        # full_step_position(sys, dt)
-        # sys.cm_pos = wrap_positions(sys.cm_pos, L)
-        # compute_forces_and_torques(sys, nbr_list)
-        # half_step_velocity_final(sys, dt)
-        # half_step_L_final(sys, dt)
-
-        half_step_velocity(sys, spc_e, dt)
-        half_step_L(sys, spc_e, dt)
-        full_step_quat(sys, spc_e, dt)
-        full_step_position(sys, dt)
-        sys.cm_pos = wrap_positions(sys.cm_pos, L)
-        compute_forces_and_torques(sys, nbr_list)
-        half_step_velocity_final(sys, spc_e, dt)
-        half_step_L_final(sys, spc_e, dt)
-
-        # === DIAGNOSTICS ===
-        E     = kinetic_energy(sys) + rotational_energy(sys) + sys.U
-        T     = 2 * kinetic_energy(sys) / (3 * N * kB)
-        L_tot = sys.L.sum(axis=0)
-        qnorm = np.max(np.abs(np.linalg.norm(sys.quat, axis=1) - 1.0))
-        s[step] = step
-        en[step] = E 
-        U_arr[step] = sys.U
-        F_norms[step] = np.linalg.norm(sys.force)
-        T_norms[step] = np.linalg.norm(sys.T)
-        O, H1, H2 = get_atom_positions(sys)
-
-        # molécule 0 vs molécule 1
-        dist_OO[step]   = np.linalg.norm(mic(O[0]  - O[1],  L))
-        # dist_OH1[step]  = np.linalg.norm(mic(O[0]  - H1[1], L))
-        # dist_OH2[step]  = np.linalg.norm(mic(O[0]  - H2[1], L))
-        # dist_H1O[step]  = np.linalg.norm(mic(H1[0] - O[1],  L))
-        # dist_H2O[step]  = np.linalg.norm(mic(H2[0] - O[1],  L))
-        # dist_H1H1[step] = np.linalg.norm(mic(H1[0] - H1[1], L))
-        # dist_H1H2[step] = np.linalg.norm(mic(H1[0] - H2[1], L))
-        # dist_H1H2b[step] = np.linalg.norm(mic(H2[0] - H1[1], L))
-        # dist_H2H2[step] = np.linalg.norm(mic(H2[0] - H2[1], L))
-
-
-        print(f"step {step:4d} | E={E:.4f} dE={abs(E-E_init)/E_init*100:.4f}% | "
-            f"T={T:.1f}K | |L_drift|={np.linalg.norm(L_tot-L_init):.2e} | "
-            f"qnorm_err={qnorm:.2e}| sum T = {sys.T.sum(axis=0)}")
-        
-        if step % skip == 0:
-            O, H1, H2 = get_atom_positions(sys)
-            O_traj.append(O.copy())
-            H1_traj.append(H1.copy())
-            H2_traj.append(H2.copy())
-
-
-    fig_anim = plt.figure(figsize=(7, 7))
-    ax = fig_anim.add_subplot(111, projection='3d')
-
-    scat_O  = ax.scatter([], [], [], c='red',   s=80,  label='O')
-    scat_H1 = ax.scatter([], [], [], c='white', s=40,  edgecolors='gray', label='H')
-    scat_H2 = ax.scatter([], [], [], c='white', s=40,  edgecolors='gray')
-
-    ax.set_xlim(0, L)
-    ax.set_ylim(0, L)
-    ax.set_zlim(0, L)
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
-    ax.legend()
-    ax.set_facecolor('black')
-    fig_anim.patch.set_facecolor('black')
-    title = ax.text2D(0.05, 0.95, '', transform=ax.transAxes, color='white', fontsize=12)
-
-
-    def update(frame):
-        O  = O_traj[frame]
-        H1 = H1_traj[frame]
-        H2 = H2_traj[frame]
-        scat_O._offsets3d  = (O[:,0],  O[:,1],  O[:,2])
-        scat_H1._offsets3d = (H1[:,0], H1[:,1], H1[:,2])
-        scat_H2._offsets3d = (H2[:,0], H2[:,1], H2[:,2])
-        title.set_text(f'frame {frame} / step {frame * skip}')
-        return scat_O, scat_H1, scat_H2
-
-    ani = animation.FuncAnimation(fig_anim, update, frames=len(O_traj), interval=50, blit=False)
-    plt.tight_layout()
-    plt.show()
-
-
-
-    print(max(abs(en - E_init*np.ones(len(en)))/E_init*100))
-
-
-    plt.figure(figsize=(12, 4))
-
-    plt.subplot(1, 4, 1)
-    plt.plot(F_norms)
-    plt.title('||F||')
-    plt.xlabel('step')
-
-    plt.subplot(1, 4, 2)
-    plt.plot(T_norms)
-    plt.title('||T||')
-    plt.xlabel('step')
-
-    plt.subplot(1, 4, 3)
-    plt.plot(en)
-    plt.title('E_tot')
-    plt.xlabel('step')
-
-    plt.subplot(1, 4, 4)
-    plt.plot(U_arr)
-    plt.title('U')
-    plt.xlabel('step')
-
-    plt.tight_layout()
-
-
-    plt.figure(figsize=(14, 4))
-    plt.plot(dist_OO,   label='O-O')
-    #plt.plot(dist_OH1,  label='O-H1')
-    #plt.plot(dist_OH2,  label='O-H2')
-    #plt.plot(dist_H1O,  label='H1-O')
-    #plt.plot(dist_H2O,  label='H2-O')
-    #plt.plot(dist_H1H1, label='H1-H1')
-    #plt.plot(dist_H1H2, label='H1-H2')
-    #plt.plot(dist_H1H2b, label='H2-H1')
-    #plt.plot(dist_H2H2, label='H2-H2')
-    plt.xlabel('step')
-    plt.ylabel('distance (Å)')
-    plt.title('distances inter-moléculaires')
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-    """
-    TODO:
-    - Inclure l'énergie potentiel pour mieux diagnostiquer le energy drift
-    - Optimsier le calcul de la neighbour list
-    - faire un graph du temps de simulation en fonction du nombre de molécule pour vérifier que la neighbour list transforme t(N^2) en t(N)
-    - Implementer nose hoover
-    - Tester avec potentiel Lennard Jones
-    """
-
-    #######################################################################################################################################################################################################################################################################################
-
-    
+    return cm_pos, cm_vel, quats, L_body, forces, tau, pe

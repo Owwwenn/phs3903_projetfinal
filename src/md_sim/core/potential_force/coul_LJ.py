@@ -1,190 +1,138 @@
 import numpy as np
-import quaternion as qtn
-from scipy.spatial.transform import Rotation
-from md_sim.core.system import mic
-from md_sim.core.neighbour_list.neighbour_list import build_nl_pairs_cells
+from system import get_atom_positions
+# ─────────────────────────────────────────────
+#  LJ forces  (O-O only, same as before)
+# ─────────────────────────────────────────────
+def build_lj_forces(n, pos, L, nbr_list, epsilon, sigma, rc):
+    i_idx, j_idx = nbr_list
+    dr = pos[j_idx] - pos[i_idx]
+    dr -= L * np.round(dr / L)
+    r2 = np.einsum('ij,ij->i', dr, dr)
+    mask = r2 < rc**2
+    i_idx, j_idx, dr, r2 = i_idx[mask], j_idx[mask], dr[mask], r2[mask]
 
-def build_potential_vector_force_torque_matrix(n: int, r, q, Lx:float, Ly:float, Lz:float, nbr_list, theta:float, z_cm: float, r_oh:float, q_o:float, q_h:float, eps_LJ: float, sigma_LJ: float, k_coul: float):
-    """Calcule les potentiels, forces, torques pour une molécule à trois site donné, avec Coulomb et LJ.
+    rc6     = (sigma**2 / rc**2)**3
+    E_shift = 4.0 * epsilon * (rc6**2 - rc6)
+    r2i  = sigma**2 / r2
+    r6i  = r2i**3
+    r12i = r6i**2
 
-    Args:
-        n (int): Nombre de molécules
-        v (_type_): Matrice d'état du système 
-        Lx (float): Taille de la boîte de simulation en x
-        Ly (float): Taille de la boîte de simulation en y
-        Lz (float): Taille de la boîte de simulation en z
-        nbr_list (_type_): Liste de booléens des voisins pour chaque molécule
-        theta (float): Angle H-O-H du modèle de la molécule d'eau
-        r_oh (float): Distance O-H du modèle de la molécule d'eau
-        q_o (float): Charge sur l'atome d'oxygène
-        q_h (float): Charge sur l'atome d'hydrogène
-        eps_LJ (float): epsilon de Lennard-Jones pour l'interaction O-O 
-        sigma_LJ (float): sigma de Lennard-Jones pour l'interaction O-O 
-        k_coul (float): 1/4pieps0 dans les goofy ahh unités de Karim  
+    pe     = np.sum(4.0 * epsilon * (r12i - r6i) - E_shift)
+    fmag_r = 48.0 * epsilon * r2i * (r12i - 0.5 * r6i)
+    f_vec  = fmag_r[:, None] * dr
 
-    Returns:
-        list: U, F, tau Arrays de potentiels, Forces et Torque
+    forces = np.zeros((n, 3))
+    np.add.at(forces, i_idx, -f_vec)
+    np.add.at(forces, j_idx,  f_vec)
+    return forces, pe
+
+# ─────────────────────────────────────────────
+#  Coulomb forces + torques
+#  9 site-site pairs per molecule pair: OO, OH1, OH2, H1O, H1H1, H1H2, H2O, H2H1, H2H2
+# ─────────────────────────────────────────────
+def build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc_coul):
     """
-    list_r = r
-    list_q = q
-    L = np.array([Lx,Ly,Lz])
-
-    s = np.sin(theta/2)
-    c = np.cos(theta/2)
- 
-    # Définition des positions des sites hydrogènes dans le repère de la molécule
-    r_cm = np.array([0,0,z_cm])
-    r_o = r_oh * np.array([0,0,0]) - r_cm
-    r_h1 = r_oh * np.array([0,s,c]) - r_cm 
-    r_h2 = r_oh * np.array([0,-s,c]) - r_cm 
-
-    # Neighbour lists
-    nbr_list1, nbr_list2 = nbr_list
-    i_idx, j_idx = nbr_list1
-    i_LJ, j_LJ = nbr_list2
-
-    # Définition de r et de q
-    ri = list_r[j_idx] - list_r[i_idx]             
-    rw = ri - L * np.round(ri / L)
-    ri_LJ = list_r[j_LJ] - list_r[i_LJ]
-    rw_LJ = ri_LJ - L * np.round(ri_LJ / L)
-    q_i = qtn.from_float_array(list_q[i_idx])
-    q_j = qtn.from_float_array(list_q[j_idx])
-    q_i_LJ = qtn.from_float_array(list_q[i_LJ])
-    q_j_LJ = qtn.from_float_array(list_q[j_LJ])
-
-    # Définition des vecteurs dans le repère monde
-    u_o = qtn.rotate_vectors(q_i, r_o)
-    u_h1 = qtn.rotate_vectors(q_i, r_h1) 
-    u_h2 = qtn.rotate_vectors(q_i, r_h2) 
-    v_o = qtn.rotate_vectors(q_j, r_o)
-    v_h1 = qtn.rotate_vectors(q_j, r_h1) 
-    v_h2 = qtn.rotate_vectors(q_j, r_h2) 
-    u_o_LJ = qtn.rotate_vectors(q_i_LJ, r_o)
-    v_o_LJ = qtn.rotate_vectors(q_j_LJ, r_o)
-
-    rOO = rw - u_o + v_o
-    rOH1 = rw - u_o + v_h1
-    rOH2 = rw - u_o + v_h2
-    rH1O = rw - u_h1 + v_o
-    rH1H1 = rw - u_h1 + v_h1
-    rH1H2 = rw - u_h1 + v_h2
-    rH2O = rw - u_h2 + v_o
-    rH2H1 = rw - u_h2 + v_h1
-    rH2H2 = rw - u_h2 + v_h2
-
-    r_vec = np.array([
-        rOO, rOH1, rOH2, 
-        rH1O, rH1H1, rH1H2, 
-        rH2O, rH2H1, rH2H2
-    ])
-    
-    rw_LJ = rw_LJ - u_o_LJ + v_o_LJ
-
-    # r_vec = r_vec - L * np.round(r_vec / L)
-
-    eps = 1e-12
-    # eps = 0.5*sigma_LJ
-    inv_r = 1.0 / np.sqrt(np.einsum("kij,kij->ki", r_vec, r_vec) + eps**2)
-    inv_r_LJ = 1.0 / np.sqrt(np.einsum("ij,ij->i", rw_LJ, rw_LJ) + eps**2)
-
-    # Coulomb 
-    q_left  = np.array([q_o]*3 + [q_h]*6)
-    q_right = np.array([q_o, q_h, q_h] * 3)
-    qq      = k_coul * q_left * q_right   
-    prefactor = -qq[:, None] * inv_r**3
-
-    # # LJ 
-    sig6  = sigma_LJ**6; sig12 = sig6**2
-    lj_scalar = 24 * eps_LJ * (
-        2 * sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6
-    ) * inv_r_LJ**2
-    u_LJ = 4 * eps_LJ * np.sum(sig12 * inv_r_LJ**12 - sig6 * inv_r_LJ**6)
-    F_LJ = -(lj_scalar[:, None]) * rw_LJ
-    
-    # Potentials
-    u_pair = (
-        np.einsum("k,kp->p", qq, inv_r)
-    ) 
-
-    U = np.zeros(n)
-    np.add.at(U, i_idx, 0.5 * u_pair)
-    np.add.at(U, j_idx, 0.5 * u_pair) 
-    np.add.at(U, i_LJ, 0.5 * u_LJ)
-    np.add.at(U, j_LJ, 0.5 * u_LJ)   
-
-    # Forces
-    F_pair = prefactor[:, :, None] * r_vec        # (9, N_pairs, 3)
-    F = np.zeros((n, 3))
-    for k in range(9):
-        np.add.at(F, i_idx,  F_pair[k])
-        np.add.at(F, j_idx, -F_pair[k])
-    np.add.at(F, i_LJ,  F_LJ)
-    np.add.at(F, j_LJ, -F_LJ)
-    
-    # Torques
-    tau = np.zeros((n, 3))
-
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[0]))
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[1]))
-    np.add.at(tau, i_idx, np.cross(u_o,  F_pair[2]))
-
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[3]))
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[4]))
-    np.add.at(tau, i_idx, np.cross(u_h1,  F_pair[5]))
-
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[6]))
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[7]))
-    np.add.at(tau, i_idx, np.cross(u_h2,  F_pair[8]))
-
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[0]))
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[3]))
-    np.add.at(tau, j_idx, np.cross(v_o,  -F_pair[6]))
-
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[1]))
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[4]))
-    np.add.at(tau, j_idx, np.cross(v_h1,  -F_pair[7]))
-
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[2]))
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[5]))
-    np.add.at(tau, j_idx, np.cross(v_h2,  -F_pair[8]))
-
-    return U, F, tau
-
-def compute_forces_and_torques(sys, model, param, nbr_list):
-    """Calcule les forces et les couples appliqués sur chaque molécule.
-
-    Args:
-        sys (MDSystem): Système moléculaire
-        nbr_list (np.ndarray): Liste des voisins
-
     Returns:
-        None: Met à jour sys.force et sys.T
+        F_coul  : (n, 3) forces on COM
+        tau     : (n, 3) torques in world frame
+        pe_coul : scalar potential energy
     """
-    Lx, Ly, Lz = param.L
-    
-    U, F, tau = build_potential_vector_force_torque_matrix(
-        sys.N, sys.cm_pos, sys.quat, Lx, Ly, Lz, nbr_list, 
-        model.HOH_rad, model.z_cm, model.OH, model.q_o, model.q_h,
-        model.eps_LJ, model.sigma_LJ, param.k_coul)
-    
-    sys.U = np.sum(U)
-    sys.force = F
-    sys.T     = tau
+    i_idx, j_idx = nbr_list
 
-if __name__ == "__main__":
-    N = 10
-    Lx, Ly, Lz = 15, 15, 15
-    L = np.array([Lx, Ly, Lz])
-    n_side = int(np.ceil(N**(1/3)))
-    xs = np.linspace(-Lx/2, Lx/2, n_side, endpoint=False)
-    ys = np.linspace(-Ly/2, Ly/2, n_side, endpoint=False)
-    zs = np.linspace(-Lz/2, Lz/2, n_side, endpoint=False)
+    # site positions for each pair
+    # molecule i sites
+    Oi  = O[i_idx];  H1i = H1[i_idx]; H2i = H2[i_idx]
+    # molecule j sites
+    Oj  = O[j_idx];  H1j = H1[j_idx]; H2j = H2[j_idx]
 
-    r = np.array([[x, y, z] 
-                        for x in xs 
-                        for y in ys 
-                        for z in zs])[:N]
-    
-    theta = np.radians(109)
-    r_oh = 1
+    # 9 displacement vectors r_ab = site_b_j - site_a_i, with MIC
+    pairs = [
+        (Oi,  Oj,  q_o, q_o),
+        (Oi,  H1j, q_o, q_h),
+        (Oi,  H2j, q_o, q_h),
+        (H1i, Oj,  q_h, q_o),
+        (H1i, H1j, q_h, q_h),
+        (H1i, H2j, q_h, q_h),
+        (H2i, Oj,  q_h, q_o),
+        (H2i, H1j, q_h, q_h),
+        (H2i, H2j, q_h, q_h),
+    ]
+
+    F_coul  = np.zeros((n, 3))
+    tau     = np.zeros((n, 3))
+    pe_coul = 0.0
+
+    # lever arms from COM to each site on molecule i (world frame)
+    lever_i = [
+        O[i_idx]  - O[i_idx],   # O lever = 0 (O is at COM)
+        H1[i_idx] - O[i_idx],   # H1 lever
+        H1[i_idx] - O[i_idx],   # H1 lever (repeated for H1-H1, H1-H2)
+        H2[i_idx] - O[i_idx],   # H2 lever
+        H2[i_idx] - O[i_idx],
+        H2[i_idx] - O[i_idx],
+    ]
+    # map each of the 9 pairs to which site on molecule i it belongs
+    #        OO  OH1 OH2 H1O H1H1 H1H2 H2O H2H1 H2H2
+    i_site = [ 0,  0,  0,  1,   1,   1,   2,   2,   2]
+    levers_i_map = [
+        O[i_idx]  - O[i_idx],   # site 0: O (zero lever)
+        H1[i_idx] - O[i_idx],   # site 1: H1
+        H2[i_idx] - O[i_idx],   # site 2: H2
+    ]
+
+    # similarly for molecule j
+    #        OO  OH1 OH2 H1O H1H1 H1H2 H2O H2H1 H2H2
+    j_site = [ 0,  1,  2,  0,   1,   2,   0,   1,   2]
+    levers_j_map = [
+        O[j_idx]  - O[j_idx],   # site 0: O
+        H1[j_idx] - O[j_idx],   # site 1: H1
+        H2[j_idx] - O[j_idx],   # site 2: H2
+    ]
+
+    for k, (si, sj, qi, qj) in enumerate(pairs):
+        dr = sj - si
+        dr -= L * np.round(dr / L)           # MIC — applied on actual site-site vector (fixes Bug #2)
+
+        r2   = np.einsum('ij,ij->i', dr, dr)
+        mask = r2 < rc_coul**2
+        if not mask.any():
+            continue
+
+        r2m   = r2[mask]
+        drm   = dr[mask]
+        i_m   = i_idx[mask]
+        j_m   = j_idx[mask]
+
+        r1    = np.sqrt(r2m)
+        r3    = r2m * r1
+
+        qq    = k_coul * qi * qj
+        pe_coul += np.sum(qq / r1)
+
+        fmag  = -qq / r3          # scalar, sign convention: F_i gets +fmag*dr
+        f_vec = fmag[:, None] * drm
+
+        np.add.at(F_coul, i_m,  f_vec)
+        np.add.at(F_coul, j_m, -f_vec)
+
+        # torques: τ = lever × F
+        lev_i = levers_i_map[i_site[k]][mask]
+        lev_j = levers_j_map[j_site[k]][mask]
+
+        np.add.at(tau, i_m,  np.cross(lev_i,  f_vec))
+        np.add.at(tau, j_m,  np.cross(lev_j, -f_vec))
+
+    return F_coul, tau, pe_coul
+
+# ─────────────────────────────────────────────
+#  Combined force/torque
+# ─────────────────────────────────────────────
+def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p):
+    O, H1, H2 = get_atom_positions(cm_pos, quats, p['r_h1'], p['r_h2'])
+
+    F_lj,    pe_lj    = build_lj_forces(n, cm_pos, L, nbr_list,
+                                         p['epsilon'], p['sigma'], p['rc_LJ'])
+    F_coul, tau, pe_coul = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list,
+                                                         p['q_o'], p['q_h'],
+                                                         p['k_coul'], p['rc_coul'])
+    return F_lj + F_coul, tau, pe_lj + pe_coul
