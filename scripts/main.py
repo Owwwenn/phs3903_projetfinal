@@ -1,19 +1,16 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from phs3903_projetfinal.src.md_sim.core.system import get_site_offsets 
-from phs3903_projetfinal.src.md_sim.core.system import make_initial_state
-from phs3903_projetfinal.src.md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
-from phs3903_projetfinal.src.md_sim.core.system import get_atom_positions
-from phs3903_projetfinal.src.md_sim.core.neighbour_list.neighbour_list import build_neighbour_list
-from phs3903_projetfinal.src.md_sim.core.system import SPCE
-from phs3903_projetfinal.src.md_sim.core.system import T_UNIT_PS
-from phs3903_projetfinal.src.md_sim.caracterisation.energy import kinetic_energy_rot
-from phs3903_projetfinal.src.md_sim.caracterisation.energy import kinetic_energy_trans
-from phs3903_projetfinal.src.md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
+from md_sim.core.system import get_site_offsets 
+from md_sim.core.system import make_initial_state
+from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
+from md_sim.core.system import get_atom_positions
+from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list
+from md_sim.core.system import SPCE
+from md_sim.core.system import T_UNIT_PS
+from md_sim.caracterisation.energy import kinetic_energy_rot
+from md_sim.caracterisation.energy import kinetic_energy_trans
+from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 
 # ─────────────────────────────────────────────
 #  Simulation parameters
@@ -22,7 +19,7 @@ N        = 64
 rho      = 0.0334        # molecules/Å³
 T_K      = 300.0
 dt_fs    = 0.5           # fs  — smaller dt needed with Coulomb
-n_steps  = 100000
+n_steps  = 100
 nl_freq  = 20
 snap_freq = 10
 

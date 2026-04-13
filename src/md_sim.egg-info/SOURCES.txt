@@ -15,10 +15,7 @@ src/md_sim/core/nose_hoover/__init__.py
 src/md_sim/core/nose_hoover/nh_trotter.py
 src/md_sim/core/potential_force/__init__.py
 src/md_sim/core/potential_force/coul_LJ.py
-src/md_sim/core/potential_force/norms.py
-src/md_sim/core/potential_force/potentiel_force.py
 src/md_sim/core/time_integrator/__init__.py
-src/md_sim/core/time_integrator/time_int.py
 src/md_sim/core/time_integrator/time_int_VECTORISED.py
 src/md_sim/gui/__init__.py
 src/md_sim/gui/visualisation.py

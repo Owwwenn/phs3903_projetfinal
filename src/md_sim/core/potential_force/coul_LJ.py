@@ -1,5 +1,5 @@
 import numpy as np
-from system import get_atom_positions
+from md_sim.core.system import get_atom_positions
 # ─────────────────────────────────────────────
 #  LJ forces  (O-O only, same as before)
 # ─────────────────────────────────────────────

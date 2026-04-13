@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-from core.system import SPCE
-from core.potential_force.coul_LJ import compute_forces_and_torques
+from md_sim.core.system import SPCE
+from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
 # ─────────────────────────────────────────────
 #  Quaternion helpers
 # ─────────────────────────────────────────────
