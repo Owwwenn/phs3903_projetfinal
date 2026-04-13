@@ -38,7 +38,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Si tout foncitonne, il ne devrait pas y avoir de problèmes avec les imports de fonctions depuis les autres fichier.
+### 4- Installer le répo comme package dans la venv
+
+```
+pip install -e .
+```
+
+Si tout fonctionne, il ne devrait pas y avoir de problèmes avec les imports de fonctions depuis les autres fichier.
 
 # (WIP) Tâches à réaliser:
 ### Infrastucture de simulation:
