@@ -9,7 +9,7 @@ SPCE = dict(
     sigma    = 3.1656,       # Å         O-O LJ
     mass     = 18.015,       # amu
     rc_LJ    = 9.0,          # Å  LJ cutoff
-    rc_coul  = 15.0,          # Å  Coulomb cutoff
+    rc_coul  = 10,          # Å  Coulomb cutoff
     q_o      = -0.8476,      # e
     q_h      =  0.4238,      # e
     r_oh     =  1.0,         # Å  O-H bond
@@ -59,35 +59,64 @@ def get_atom_positions(cm_pos, quats, r_h1, r_h2):
 # ─────────────────────────────────────────────
 #  Initial state
 # ─────────────────────────────────────────────
-def make_initial_state(N, rho, T_K, p, seed=42):
+def make_initial_state(N, rho, T_K, p, seed=42, phase='liquid'):
     np.random.seed(seed)
     L = np.full(3, (N / rho) ** (1/3))
 
-    # Cubic lattice positions
-    n_side  = int(np.ceil(N ** (1/3)))
-    spacing = L[0] / n_side
-    idx = np.array([[i, j, k]
-                    for i in range(n_side)
-                    for j in range(n_side)
-                    for k in range(n_side)])[:N]
-    cm_pos = idx * spacing
+    # ── Positions ──────────────────────────────────────────
+    if phase == 'liquid':
+        # Cubic lattice — good for dense liquid
+        n_side  = int(np.ceil(N ** (1/3)))
+        spacing = L[0] / n_side
+        idx = np.array([[i, j, k]
+                        for i in range(n_side)
+                        for j in range(n_side)
+                        for k in range(n_side)])[:N]
+        cm_pos = idx * spacing
 
-    # Translational velocities — Maxwell-Boltzmann
+    elif phase == 'gas':
+        # Random placement with minimum distance — no overlap
+        r_min   = p.get('r_min_gas', 2.5)   # Å, tweak if needed
+        cm_pos  = np.zeros((N, 3))
+        placed  = 0
+        max_try = 100_000
+        tries   = 0
+        while placed < N and tries < max_try:
+            candidate = np.random.uniform(0, L[0], size=3)
+            if placed == 0:
+                cm_pos[0] = candidate
+                placed += 1
+            else:
+                # Minimum image distances to all placed molecules
+                diffs = candidate - cm_pos[:placed]
+                diffs -= L[0] * np.round(diffs / L[0])   # PBC
+                dists = np.linalg.norm(diffs, axis=1)
+                if dists.min() >= r_min:
+                    cm_pos[placed] = candidate
+                    placed += 1
+            tries += 1
+        if placed < N:
+            raise RuntimeError(
+                f"Could only place {placed}/{N} molecules without overlap. "
+                f"Try decreasing r_min_gas (currently {r_min} Å) or rho."
+            )
+
+    # ── Translational velocities — Maxwell-Boltzmann ───────
     cm_vel  = np.random.randn(N, 3)
     cm_vel -= cm_vel.mean(axis=0)
     ke_t    = 0.5 * p['mass'] * np.sum(cm_vel**2)
     cm_vel *= np.sqrt(1.5 * N * kB * T_K / ke_t)
 
-    # Identity quaternions — safe initial orientation (fixes Bug #5)
+    # ── Quaternions — identity ─────────────────────────────
     quats = np.zeros((N, 4))
-    quats[:, 0] = 1.0    # w=1, x=y=z=0
+    quats[:, 0] = 1.0
 
-    # Angular momenta — Maxwell-Boltzmann for each axis
+    # ── Angular momenta — Maxwell-Boltzmann ────────────────
     I_body = p['I_body']
     L_body = np.random.randn(N, 3)
     for k in range(3):
-        ke_r_k   = 0.5 * np.sum(L_body[:, k]**2) / I_body[k]
-        target   = 0.5 * N * kB * T_K
+        ke_r_k = 0.5 * np.sum(L_body[:, k]**2) / I_body[k]
+        target = 0.5 * N * kB * T_K
         L_body[:, k] *= np.sqrt(target / ke_r_k)
 
     return cm_pos, cm_vel, quats, L_body, L
