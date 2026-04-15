@@ -88,17 +88,6 @@ for step in range(n_steps):
     if step % nl_freq == 0:
         nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 
-    cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
-        cm_pos, cm_vel, quats, L_body, forces, tau,
-        p['mass'], p['I_body'], L_box, p, dt, nbr_list,
-        xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
-        n_mol=N, T=T_K
-    )
-
-
-
-    if step % nl_freq == 0:
-        nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 
     cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
         cm_pos, cm_vel, quats, L_body, forces, tau,
