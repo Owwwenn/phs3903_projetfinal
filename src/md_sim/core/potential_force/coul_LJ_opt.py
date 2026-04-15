@@ -1,0 +1,162 @@
+import numpy as np
+from numba import njit
+from md_sim.core.system import get_atom_positions
+
+# ─────────────────────────────────────────────
+#  LJ forces  (O-O only)
+# ─────────────────────────────────────────────
+
+@njit(cache=True, fastmath=True)
+def _lj_kernel(pos, i_idx, j_idx, L, epsilon, sigma, rc):
+    """Numba JIT kernel for LJ forces — compiled once, cached to disk."""
+    n_pairs = len(i_idx)
+    n_atoms = pos.shape[0]
+    forces  = np.zeros((n_atoms, 3))
+    pe      = 0.0
+
+    rc2    = rc * rc
+    rc6    = (sigma * sigma / rc2) ** 3
+    Eshift = 4.0 * epsilon * (rc6 * rc6 - rc6)
+    sig2   = sigma * sigma
+
+    for k in range(n_pairs):
+        i, j = i_idx[k], j_idx[k]
+        dx = pos[j, 0] - pos[i, 0]
+        dy = pos[j, 1] - pos[i, 1]
+        dz = pos[j, 2] - pos[i, 2]
+        # MIC
+        dx -= L[0] * np.rint(dx / L[0])
+        dy -= L[1] * np.rint(dy / L[1])
+        dz -= L[2] * np.rint(dz / L[2])
+        r2 = dx*dx + dy*dy + dz*dz
+        if r2 >= rc2:
+            continue
+        r2i  = sig2 / r2
+        r6i  = r2i * r2i * r2i
+        r12i = r6i * r6i
+        pe  += 4.0 * epsilon * (r12i - r6i) - Eshift
+        fmag = 48.0 * epsilon * r2i * (r12i - 0.5 * r6i)
+        fx, fy, fz = fmag * dx, fmag * dy, fmag * dz
+        forces[i, 0] -= fx;  forces[i, 1] -= fy;  forces[i, 2] -= fz
+        forces[j, 0] += fx;  forces[j, 1] += fy;  forces[j, 2] += fz
+
+    return forces, pe
+
+
+def build_lj_forces(n, pos, L, nbr_list, epsilon, sigma, rc):
+    i_idx, j_idx = nbr_list
+    return _lj_kernel(pos, i_idx, j_idx, L, epsilon, sigma, rc)
+
+
+# ─────────────────────────────────────────────
+#  Coulomb forces + torques — fully vectorised
+#
+#  All 9 site-site pairs are stacked along a leading
+#  "pair type" axis P=9, so every operation is a single
+#  NumPy call over an (P, N, 3) tensor instead of a
+#  Python loop over 9 iterations.
+#
+#  Pair order  (P index):
+#    0  OO   1  OH1   2  OH2
+#    3  H1O  4  H1H1  5  H1H2
+#    6  H2O  7  H2H1  8  H2H2
+# ─────────────────────────────────────────────
+
+# Which site on molecule-i / molecule-j for each of the 9 pairs.
+# 0 = O, 1 = H1, 2 = H2
+_I_SITE = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])   # (9,)
+_J_SITE = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2])   # (9,)
+
+
+def build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc_coul):
+    """
+    Returns:
+        F_coul  : (n, 3) forces on COM
+        tau     : (n, 3) torques in world frame
+        pe_coul : scalar potential energy
+    """
+    i_idx, j_idx = nbr_list
+    rc2 = rc_coul ** 2
+
+    # ── Site positions stacked as (3, N, 3): axis-0 indexes O/H1/H2 ──────────
+    sites_i = np.stack([O[i_idx], H1[i_idx], H2[i_idx]])   # (3, N, 3)
+    sites_j = np.stack([O[j_idx], H1[j_idx], H2[j_idx]])   # (3, N, 3)
+
+    # ── Gather the 9 pair combinations → (9, N, 3) ───────────────────────────
+    si = sites_i[_I_SITE]   # (9, N, 3)
+    sj = sites_j[_J_SITE]   # (9, N, 3)
+
+    # ── Displacement + minimum-image convention ───────────────────────────────
+    dr = sj - si                            # (9, N, 3)
+    dr -= L * np.round(dr / L)
+
+    # ── Squared distances + cutoff mask ──────────────────────────────────────
+    r2   = np.einsum('pni,pni->pn', dr, dr) # (9, N)
+    mask = r2 < rc2                          # (9, N)  boolean
+
+    # Avoid division by zero outside the cutoff (values discarded by mask)
+    r2_safe = np.where(mask, r2, 1.0)
+
+    # ── Charge products: (9,) broadcast over N ───────────────────────────────
+    # qq order matches pair order above
+    qq_vals = np.array([
+        q_o*q_o, q_o*q_h, q_o*q_h,
+        q_h*q_o, q_h*q_h, q_h*q_h,
+        q_h*q_o, q_h*q_h, q_h*q_h,
+    ]) * k_coul                              # (9,)
+    qq = qq_vals[:, None]                    # (9, 1) for broadcasting
+
+    # ── Potential energy ──────────────────────────────────────────────────────
+    r1      = np.sqrt(r2_safe)               # (9, N)
+    pe_coul = np.sum((qq / r1) * mask)
+
+    # ── Force magnitude / r  (fmag · dr gives the force vector) ──────────────
+    r3   = r2_safe * r1                      # (9, N)
+    fmag = np.where(mask, -qq / r3, 0.0)    # (9, N)  zero outside cutoff
+
+    # ── Force vectors ─────────────────────────────────────────────────────────
+    f_vec = fmag[:, :, None] * dr            # (9, N, 3)
+
+    # ── Lever arms from COM (= O position) ───────────────────────────────────
+    # levers_i[s] = site_s_position[i_idx] - O[i_idx]
+    levers_i = sites_i - sites_i[0:1]        # (3, N, 3)  O lever = 0 by construction
+    levers_j = sites_j - sites_j[0:1]        # (3, N, 3)
+
+    lev_i = levers_i[_I_SITE]               # (9, N, 3)
+    lev_j = levers_j[_J_SITE]               # (9, N, 3)
+
+    # ── Torques: τ = lever × F ────────────────────────────────────────────────
+    tau_i =  np.cross(lev_i,  f_vec)         # (9, N, 3)
+    tau_j =  np.cross(lev_j, -f_vec)         # (9, N, 3)
+
+    # ── Reduce over the 9 pair types before scatter-add ──────────────────────
+    # Summing first cuts add.at calls from 9×4=36 down to 4.
+    fi_sum = f_vec.sum(axis=0)               # (N, 3)
+    fj_sum = (-f_vec).sum(axis=0)
+    ti_sum = tau_i.sum(axis=0)               # (N, 3)
+    tj_sum = tau_j.sum(axis=0)
+
+    F_coul = np.zeros((n, 3))
+    tau    = np.zeros((n, 3))
+
+    np.add.at(F_coul, i_idx, fi_sum)
+    np.add.at(F_coul, j_idx, fj_sum)
+    np.add.at(tau,    i_idx, ti_sum)
+    np.add.at(tau,    j_idx, tj_sum)
+
+    return F_coul, tau, pe_coul
+
+
+# ─────────────────────────────────────────────
+#  Combined force/torque
+# ─────────────────────────────────────────────
+
+def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p):
+    O, H1, H2 = get_atom_positions(cm_pos, quats, p['r_h1'], p['r_h2'])
+
+    F_lj,   pe_lj   = build_lj_forces(n, cm_pos, L, nbr_list,
+                                        p['epsilon'], p['sigma'], p['rc_LJ'])
+    F_coul, tau, pe_coul = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list,
+                                                         p['q_o'], p['q_h'],
+                                                         p['k_coul'], p['rc_coul'])
+    return F_lj + F_coul, tau, pe_lj + pe_coul

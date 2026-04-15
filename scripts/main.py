@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from md_sim.core.system import get_site_offsets 
 from md_sim.core.system import make_initial_state
-from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
+from md_sim.core.potential_force.coul_LJ_opt import compute_forces_and_torques
 from md_sim.core.system import get_atom_positions
 from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list
 from md_sim.core.system import SPCE
@@ -88,6 +88,8 @@ for step in range(n_steps):
     if step % nl_freq == 0:
         nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 
+<<<<<<< HEAD
+
 
     cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
         cm_pos, cm_vel, quats, L_body, forces, tau,
@@ -136,6 +138,7 @@ T_target = np.where(np.arange(n_steps) < n_equil, T_start,
            np.where(np.arange(n_steps) < n_equil + n_ramp,
                     T_start + (np.arange(n_steps) - n_equil) / n_ramp * (T_end - T_start),
                     T_end))
+T_err = np.abs(T_arr - T_target)
 
 COLORS = ['#00ffaa', '#ff6b6b', '#4488ff', '#ffdd00']
 
@@ -177,8 +180,8 @@ ax_dE.semilogy(t_fs[valid], dE_arr[valid], color='#ff44cc', lw=1.5)
 ax_dE.set(title='|ΔE/E₀| energy drift', xlabel='Time [fs]', ylabel='(log)')
 ax_dE.yaxis.set_tick_params(which='both', colors='#ddddee')
 
-ax_T.plot(t_fs, T_arr,    color='#ff9944', lw=1.5, label='T inst')
-ax_T.plot(t_fs, T_target, color='#ffffff', lw=1.0, linestyle='--', label='T cible')
+ax_T.semilogy(t_fs, T_err,    color='#ff9944', lw=1.5, label='T inst')
+# ax_T.plot(t_fs, T_target, color='#ffffff', lw=1.0, linestyle='--', label='T cible')
 ax_T.set(title='Température instantanée', xlabel='Time [fs]', ylabel='K')
 ax_T.legend(facecolor='#1a1a2e', edgecolor='#555577', labelcolor='#ffffff', fontsize=8)
 
