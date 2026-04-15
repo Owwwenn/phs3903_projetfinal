@@ -2,6 +2,10 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from md_sim.core.system import SPCE
 from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
+from md_sim.core.system import kB
+
+
+
 # ─────────────────────────────────────────────
 #  Quaternion helpers
 # ─────────────────────────────────────────────
@@ -23,18 +27,40 @@ def axis_angle_to_quat(axis, angles):
     c = np.cos(h)
     return np.stack([c, axis[0]*s, axis[1]*s, axis[2]*s], axis=1)
 
+def nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt):
+    I1, I2, I3 = SPCE['I_body']
+    q_t = (3*n_mol - 3) * kB * T / (50**2)
+    q_r = 3*n_mol * kB * T / (50**2)
+    
+    KE_t = 0.5 * np.sum(mass * np.sum(cm_vel**2, axis=1))
+    KE_r = 0.5 * np.sum(L_body**2 / np.array([I1, I2, I3]))
+    
+    g_t = (2*KE_t - (3*n_mol - 3) * kB*T) / q_t
+    g_r = (2*KE_r - 3*n_mol * kB*T) / q_r
+    
+    xi_t += 0.5 * dt * g_t
+    xi_r += 0.5 * dt * g_r
+    s_t += 0.5 * dt * xi_t
+    s_r += 0.5 * dt * xi_r
+    
+    return xi_t, xi_r, s_t, s_r
+
+
 # ─────────────────────────────────────────────
 #  Rotational integrator  (symplectic, fixed order)
 # ─────────────────────────────────────────────
-def half_step_L(L_ang, tau_body, dt):
-    """First half-step: L += 0.5*dt*tau, then free Euler rotation."""
-    L_ang = L_ang + 0.5 * dt * tau_body
-    return _free_rotor_half(L_ang, dt)
+def half_step_L(L_ang, tau_body, dt, xi_r):
+    """Step 1: kick → free rotor → NH rescaling"""
+    L_ang = L_ang + 0.5 * dt * tau_body    
+    L_ang = _free_rotor_half(L_ang, dt)      
+    L_ang = L_ang * np.exp(-0.5 * dt * xi_r) 
+    return L_ang
 
-def half_step_L_final(L_ang, tau_body, dt):
-    """Second half-step: free Euler rotation (reversed), then L += 0.5*dt*tau."""
-    L_ang = _free_rotor_half_inv(L_ang, dt)
-    L_ang = L_ang + 0.5 * dt * tau_body
+def half_step_L_final(L_ang, tau_body, dt, xi_r):
+    """Step 2: NH rescaling → free rotor inv → kick"""
+    L_ang = L_ang * np.exp(-0.5 * dt * xi_r) 
+    L_ang = _free_rotor_half_inv(L_ang, dt)   
+    L_ang = L_ang + 0.5 * dt * tau_body      
     return L_ang
 
 def _free_rotor_half(L, dt, I1=None, I2=None, I3=None):
@@ -99,30 +125,38 @@ def world_to_body(quats, v_world):
 #  Full Velocity Verlet step (translation + rotation)
 # ─────────────────────────────────────────────
 def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
-                          I_body, L_box, p, dt, nbr_list):
-    n = len(cm_pos)
+                          I_body, L_box, p, dt, nbr_list, xi_t = 0, xi_r = 0, s_t = 0, s_r = 0, n_mol = 0, T = 0):
 
-    # --- 1. Half-step translations ---
+    # --- 1. UPDATENHCP premier demi-pas ---
+    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
+
+    # --- 2. Half-step translations ---
+    cm_vel = np.exp(-0.5 * dt * xi_t) * cm_vel
     cm_vel = cm_vel + 0.5 * dt * forces / mass
 
-    # --- 2. Half-step rotation (L, then free rotor) ---
+    # --- 3. Half-step rotation ---
     tau_body = world_to_body(quats, tau)
-    L_body   = half_step_L(L_body, tau_body, dt)
+    L_body = half_step_L(L_body, tau_body, dt, xi_r)
 
-    # --- 3. Full-step positions ---
+    # --- 4. Full-step positions ---
     cm_pos = (cm_pos + dt * cm_vel) % L_box
 
-    # --- 4. Full-step quaternions ---
+    # --- 5. Full-step quaternions ---
     quats = full_step_quat(quats, L_body, I_body, dt)
 
-    # --- 5. Recompute forces and torques ---
-    forces, tau, pe = compute_forces_and_torques(n, cm_pos, quats, L_box, nbr_list, p)
+    # --- 6. Recompute forces and torques ---
+    forces, tau, pe = compute_forces_and_torques(len(cm_pos), cm_pos, quats, L_box, nbr_list, p)
 
-    # --- 6. Second half-step translations ---
-    cm_vel = cm_vel + 0.5 * dt * forces / mass
-
-    # --- 7. Second half-step rotation (reverse free rotor, then L) ---
+    # --- 7. Second half-step rotation ---
     tau_body = world_to_body(quats, tau)
-    L_body   = half_step_L_final(L_body, tau_body, dt)
+    L_body = half_step_L_final(L_body, tau_body, dt, xi_r)
 
-    return cm_pos, cm_vel, quats, L_body, forces, tau, pe
+    # --- 8. Second half-step translations ---
+    cm_vel = cm_vel * np.exp(-0.5 * dt * xi_t)
+    cm_vel += 0.5 * dt * forces / mass
+
+    # --- 9. UPDATENHCP deuxième demi-pas ---
+    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r,
+                                       cm_vel, L_body, n_mol, mass, T, dt)
+
+    return cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r

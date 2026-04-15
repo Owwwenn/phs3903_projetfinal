@@ -15,21 +15,34 @@ from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 # ─────────────────────────────────────────────
 #  Simulation parameters
 # ─────────────────────────────────────────────
-N        = 64
+N        = 216
 rho      = 0.0334        # molecules/Å³
 T_K      = 300.0
-dt_fs    = 0.5           # fs  — smaller dt needed with Coulomb
-n_steps  = 100
+dt_fs    = 1.0          # fs  — smaller dt needed with Coulomb
 nl_freq  = 20
 snap_freq = 10
-
+xi_t, xi_r = 0.0, 0.0
+s_t,  s_r  = 0.0, 0.0
 dt = (dt_fs * 1e-3) / T_UNIT_PS
+
+
+T_start = 300.0
+T_end   = 600
+n_equil = 100    # steps à 300K pour équilibrer d'abord
+n_ramp  = 10000  # steps pour monter de 300 → 500K
+n_prod  = 100    # steps à 500K
+
+n_steps = n_equil + n_ramp + n_prod
 
 # Build parameter dict with precomputed geometry
 r_h1, r_h2 = get_site_offsets(SPCE['theta'], SPCE['r_oh'])
 p = {**SPCE, 'r_h1': r_h1, 'r_h2': r_h2}
 
 cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_K, p)
+
+L_box_new = np.array([L_box[0], L_box[1], L_box[2] * 5.0])
+cm_pos[:, 2] += 2 * L_box[2]  # ← 2x pour centrer dans une boite 5x
+L_box = L_box_new
 
 nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p)
@@ -45,9 +58,15 @@ ket_arr   = np.zeros(n_steps)
 ker_arr   = np.zeros(n_steps)
 fnorm_arr = np.zeros(n_steps)
 dE_arr    = np.zeros(n_steps)
+T_arr = np.zeros(n_steps)
 snaps_O   = []
 snaps_H1  = []
 snaps_H2  = []
+
+rho_z_init, z_edges = np.histogram(cm_pos[:, 2], bins=100, range=(0, L_box[2]))
+z_centers = 0.5 * (z_edges[:-1] + z_edges[1:])
+dz = z_edges[1] - z_edges[0]
+rho_z_init = rho_z_init / (L_box[0] * L_box[1] * dz)  # molecules/Å³
 
 print(f"{'step':>7}  {'E/N':>10}  {'PE/N':>10}  {'KE_t/N':>10}  {'KE_r/N':>10}  {'|dE/E0|':>10}")
 print("-" * 65)
@@ -56,17 +75,46 @@ print("-" * 65)
 #  Main loop
 # ─────────────────────────────────────────────
 for step in range(n_steps):
+
+    # Température cible
+    if step < n_equil:
+        T_K = T_start
+    elif step < n_equil + n_ramp:
+        frac = (step - n_equil) / n_ramp
+        T_K = T_start + frac * (T_end - T_start)
+    else:
+        T_K = T_end
+
     if step % nl_freq == 0:
         nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 
-    cm_pos, cm_vel, quats, L_body, forces, tau, pe = velocity_verlet_step(
+    cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
         cm_pos, cm_vel, quats, L_body, forces, tau,
-        p['mass'], p['I_body'], L_box, p, dt, nbr_list
+        p['mass'], p['I_body'], L_box, p, dt, nbr_list,
+        xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
+        n_mol=N, T=T_K
+    )
+
+
+
+    if step % nl_freq == 0:
+        nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
+
+    cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
+        cm_pos, cm_vel, quats, L_body, forces, tau,
+        p['mass'], p['I_body'], L_box, p, dt, nbr_list,
+        xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
+        n_mol=N, T=T_K
     )
 
     ke_t = kinetic_energy_trans(cm_vel, p['mass'])
     ke_r = kinetic_energy_rot(L_body, p['I_body'])
     te   = ke_t + ke_r + pe
+
+    kB_kcal = 0.001987  # kcal/mol/K
+    T_inst_t = (2 * ke_t) / ((3*N - 3) * kB_kcal)
+    T_inst_r = (2 * ke_r) / (3*N * kB_kcal)
+    T_arr[step] = 0.5 * (T_inst_t + T_inst_r)
 
     te_arr[step]    = te
     pe_arr[step]    = pe
@@ -89,9 +137,17 @@ for step in range(n_steps):
         te_arr[step:] = np.nan; pe_arr[step:] = np.nan
         break
 
+rho_z_final, _ = np.histogram(cm_pos[:, 2], bins=100, range=(0, L_box[2]))
+rho_z_final = rho_z_final / (L_box[0] * L_box[1] * dz)
+
 # ─────────────────────────────────────────────
 #  Static plots
 # ─────────────────────────────────────────────
+T_target = np.where(np.arange(n_steps) < n_equil, T_start,
+           np.where(np.arange(n_steps) < n_equil + n_ramp,
+                    T_start + (np.arange(n_steps) - n_equil) / n_ramp * (T_end - T_start),
+                    T_end))
+
 COLORS = ['#00ffaa', '#ff6b6b', '#4488ff', '#ffdd00']
 
 def style_ax(ax, three_d=False):
@@ -111,12 +167,12 @@ t_fs = np.arange(n_steps) * dt_fs
 fig, axes = plt.subplots(2, 3, figsize=(16, 9))
 fig.patch.set_facecolor('#111118')
 for ax in axes.flat: style_ax(ax)
-ax_te, ax_pe, ax_ke, ax_fn, ax_dE, ax_ker = axes.flat
+ax_te, ax_pe, ax_ke, ax_fn, ax_dE, ax_T = axes.flat
 
-ax_te.plot(t_fs, te_arr / N,  color='#ffe66d', lw=1.5)
+ax_te.plot(t_fs, te_arr / N, color='#ffe66d', lw=1.5)
 ax_te.set(title='Total energy / N', xlabel='Time [fs]', ylabel='kcal/mol')
 
-ax_pe.plot(t_fs, pe_arr / N,  color='#4ecdc4', lw=1.5)
+ax_pe.plot(t_fs, pe_arr / N, color='#4ecdc4', lw=1.5)
 ax_pe.set(title='Potential energy / N', xlabel='Time [fs]', ylabel='kcal/mol')
 
 ax_ke.plot(t_fs, ket_arr / N, color='#ff6b6b', lw=1.5, label='KE_trans')
@@ -132,11 +188,31 @@ ax_dE.semilogy(t_fs[valid], dE_arr[valid], color='#ff44cc', lw=1.5)
 ax_dE.set(title='|ΔE/E₀| energy drift', xlabel='Time [fs]', ylabel='(log)')
 ax_dE.yaxis.set_tick_params(which='both', colors='#ddddee')
 
-ax_ker.plot(t_fs, (ket_arr + ker_arr) / N, color='#88ff00', lw=1.5)
-ax_ker.set(title='Total KE / N', xlabel='Time [fs]', ylabel='kcal/mol')
+ax_T.plot(t_fs, T_arr,    color='#ff9944', lw=1.5, label='T inst')
+ax_T.plot(t_fs, T_target, color='#ffffff', lw=1.0, linestyle='--', label='T cible')
+ax_T.set(title='Température instantanée', xlabel='Time [fs]', ylabel='K')
+ax_T.legend(facecolor='#1a1a2e', edgecolor='#555577', labelcolor='#ffffff', fontsize=8)
 
 fig.suptitle(f'SPC/E Water  |  LJ + Coulomb  |  Velocity Verlet  |  dt={dt_fs} fs  |  N={N}',
              color='#ffffff', fontsize=12, fontweight='bold')
+plt.tight_layout()
+
+fig2, (ax_rho1, ax_rho2) = plt.subplots(1, 2, figsize=(14, 5))
+fig2.patch.set_facecolor('#111118')
+style_ax(ax_rho1); style_ax(ax_rho2)
+
+ax_rho1.plot(z_centers, rho_z_init,  color='#4ecdc4', lw=1.5)
+ax_rho1.axhline(rho, color='#ffffff', lw=1.0, linestyle='--', label='ρ bulk')
+ax_rho1.set(title='Profil de densité initial', xlabel='z [Å]', ylabel='ρ [mol/Å³]')
+ax_rho1.legend(facecolor='#1a1a2e', edgecolor='#555577', labelcolor='#ffffff', fontsize=8)
+
+ax_rho2.plot(z_centers, rho_z_final, color='#ff6b6b', lw=1.5)
+ax_rho2.axhline(rho, color='#ffffff', lw=1.0, linestyle='--', label='ρ bulk')
+ax_rho2.set(title=f'Profil de densité final  (T={T_end}K)', xlabel='z [Å]', ylabel='ρ [mol/Å³]')
+ax_rho2.legend(facecolor='#1a1a2e', edgecolor='#555577', labelcolor='#ffffff', fontsize=8)
+
+fig2.suptitle('Profil de densité en z — interface liquide-vapeur',
+              color='#ffffff', fontsize=12, fontweight='bold')
 plt.tight_layout()
 
 # ─────────────────────────────────────────────
