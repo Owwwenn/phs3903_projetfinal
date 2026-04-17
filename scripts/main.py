@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from md_sim.core.system import get_site_offsets 
 from md_sim.core.system import make_initial_state
-from md_sim.core.potential_force.coul_LJ_opt import compute_forces_and_torques
+from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
 from md_sim.core.system import get_atom_positions
 from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list
 from md_sim.core.system import SPCE
@@ -16,24 +16,21 @@ from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 #  Simulation parameters
 # ─────────────────────────────────────────────
 N        = 216
-# rho      = 0.0334        # molecules/Å³
-rho      = 2e-3        # molecules/Å³
-# T_K      = 300.0
+rho      = 2*10**(-5)#0.0334        # molecules/Å³
+T_K      = 500
 dt_fs    = 1.0          # fs  — smaller dt needed with Coulomb
-nl_freq  = 10
-snap_freq = 100
+nl_freq  = 20
+snap_freq = 10
 xi_t, xi_r = 0.0, 0.0
 s_t,  s_r  = 0.0, 0.0
 dt = (dt_fs * 1e-3) / T_UNIT_PS
 
-_wolf = True
-_phase = 'gas'
 
-T_start = 300.0
-T_end   = 600
-n_equil = 100    # steps à 300K pour équilibrer d'abord
-n_ramp  = 10000  # steps pour monter de 300 → 500K
-n_prod  = 100    # steps à 500K
+T_start = 500
+T_end   = 100
+n_equil = 5000   # steps à 300K pour équilibrer d'abord
+n_ramp  = 10000 # steps pour monter de 300 → 500K
+n_prod  = 5000  # steps à 500K
 
 n_steps = n_equil + n_ramp + n_prod
 
@@ -41,14 +38,14 @@ n_steps = n_equil + n_ramp + n_prod
 r_h1, r_h2 = get_site_offsets(SPCE['theta'], SPCE['r_oh'])
 p = {**SPCE, 'r_h1': r_h1, 'r_h2': r_h2}
 
-cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_start, p, seed=42, phase=_phase)
+cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_K, p)
 
 L_box_new = np.array([L_box[0], L_box[1], L_box[2] * 5.0])
 cm_pos[:, 2] += 2 * L_box[2]  # ← 2x pour centrer dans une boite 5x
 L_box = L_box_new
 
 nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
-forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p, _wolf)
+forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p)
 
 ke_t0 = kinetic_energy_trans(cm_vel, p['mass'])
 ke_r0 = kinetic_energy_rot(L_body, p['I_body'])
@@ -95,8 +92,19 @@ for step in range(n_steps):
         cm_pos, cm_vel, quats, L_body, forces, tau,
         p['mass'], p['I_body'], L_box, p, dt, nbr_list,
         xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
-        n_mol=N, T=T_K,
-        wolf=_wolf
+        n_mol=N, T=T_K, wolf=True
+    )
+
+
+
+    if step % nl_freq == 0:
+        nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
+
+    cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
+        cm_pos, cm_vel, quats, L_body, forces, tau,
+        p['mass'], p['I_body'], L_box, p, dt, nbr_list,
+        xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
+        n_mol=N, T=T_K
     )
 
     ke_t = kinetic_energy_trans(cm_vel, p['mass'])
@@ -139,7 +147,6 @@ T_target = np.where(np.arange(n_steps) < n_equil, T_start,
            np.where(np.arange(n_steps) < n_equil + n_ramp,
                     T_start + (np.arange(n_steps) - n_equil) / n_ramp * (T_end - T_start),
                     T_end))
-T_err = np.abs(T_arr - T_target)
 
 COLORS = ['#00ffaa', '#ff6b6b', '#4488ff', '#ffdd00']
 
@@ -181,8 +188,8 @@ ax_dE.semilogy(t_fs[valid], dE_arr[valid], color='#ff44cc', lw=1.5)
 ax_dE.set(title='|ΔE/E₀| energy drift', xlabel='Time [fs]', ylabel='(log)')
 ax_dE.yaxis.set_tick_params(which='both', colors='#ddddee')
 
-ax_T.semilogy(t_fs, T_err,    color='#ff9944', lw=1.5, label='T inst')
-# ax_T.plot(t_fs, T_target, color='#ffffff', lw=1.0, linestyle='--', label='T cible')
+ax_T.plot(t_fs, T_arr,    color='#ff9944', lw=1.5, label='T inst')
+ax_T.plot(t_fs, T_target, color='#ffffff', lw=1.0, linestyle='--', label='T cible')
 ax_T.set(title='Température instantanée', xlabel='Time [fs]', ylabel='K')
 ax_T.legend(facecolor='#1a1a2e', edgecolor='#555577', labelcolor='#ffffff', fontsize=8)
 
