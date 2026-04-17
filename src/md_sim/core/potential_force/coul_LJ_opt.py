@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+from scipy.special import erfc
 from md_sim.core.system import get_atom_positions
 
 # ─────────────────────────────────────────────
@@ -146,17 +147,110 @@ def build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc
 
     return F_coul, tau, pe_coul
 
+def build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc_coul, alpha):
+    """
+    Returns:
+        F_coul  : (n, 3) forces on COM
+        tau     : (n, 3) torques in world frame
+        pe_coul : scalar potential energy
+    """
+    i_idx, j_idx = nbr_list
+    rc2 = rc_coul ** 2
+
+    sites_i = np.stack([O[i_idx], H1[i_idx], H2[i_idx]])
+    sites_j = np.stack([O[j_idx], H1[j_idx], H2[j_idx]])
+
+    si = sites_i[_I_SITE]
+    sj = sites_j[_J_SITE]
+
+    dr = sj - si
+    dr -= L * np.round(dr / L)
+
+    r2   = np.einsum('pni,pni->pn', dr, dr)
+    mask = r2 < rc2
+    r2_safe = np.where(mask, r2, 1.0)
+
+    qq_vals = np.array([
+        q_o*q_o, q_o*q_h, q_o*q_h,
+        q_h*q_o, q_h*q_h, q_h*q_h,
+        q_h*q_o, q_h*q_h, q_h*q_h,
+    ]) * k_coul
+    qq = qq_vals[:, None]
+
+    r1 = np.sqrt(r2_safe)
+
+    # ── Wolf terms ───────────────────────────────────────────
+    erfc_term = erfc(alpha * r1)
+    exp_term  = np.exp(-(alpha**2) * r2_safe)
+
+    # cutoff constants
+    erfc_rc = erfc(alpha * rc_coul)
+    exp_rc  = np.exp(-(alpha**2) * rc_coul**2)
+
+    dV_rc = -(erfc_rc / rc_coul**2 + (2*alpha/np.sqrt(np.pi)) * exp_rc / rc_coul)
+
+    # ── Potential energy (shifted-force) ─────────────────────
+    pe_coul = np.sum(qq * (
+        erfc_term / r1
+        - erfc_rc / rc_coul
+        - (r1 - rc_coul) * dV_rc
+    ) * mask)
+
+    # ── Forces ───────────────────────────────────────────────
+    r3 = r2_safe * r1
+
+    fmag = np.where(
+        mask,
+        -qq * (
+            erfc_term / r3
+            + (2*alpha/np.sqrt(np.pi)) * exp_term / r2_safe
+            - dV_rc / r1
+        ),
+        0.0
+    )
+
+    f_vec = fmag[:, :, None] * dr
+
+    levers_i = sites_i - sites_i[0:1]
+    levers_j = sites_j - sites_j[0:1]
+
+    lev_i = levers_i[_I_SITE]
+    lev_j = levers_j[_J_SITE]
+
+    tau_i =  np.cross(lev_i,  f_vec)
+    tau_j =  np.cross(lev_j, -f_vec)
+
+    fi_sum = f_vec.sum(axis=0)
+    fj_sum = (-f_vec).sum(axis=0)
+    ti_sum = tau_i.sum(axis=0)
+    tj_sum = tau_j.sum(axis=0)
+
+    F_coul = np.zeros((n, 3))
+    tau    = np.zeros((n, 3))
+
+    np.add.at(F_coul, i_idx, fi_sum)
+    np.add.at(F_coul, j_idx, fj_sum)
+    np.add.at(tau,    i_idx, ti_sum)
+    np.add.at(tau,    j_idx, tj_sum)
+
+    return F_coul, tau, pe_coul
 
 # ─────────────────────────────────────────────
 #  Combined force/torque
 # ─────────────────────────────────────────────
 
-def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p):
+def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p, wolf=False):
     O, H1, H2 = get_atom_positions(cm_pos, quats, p['r_h1'], p['r_h2'])
 
     F_lj,   pe_lj   = build_lj_forces(n, cm_pos, L, nbr_list,
                                         p['epsilon'], p['sigma'], p['rc_LJ'])
-    F_coul, tau, pe_coul = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list,
-                                                         p['q_o'], p['q_h'],
-                                                         p['k_coul'], p['rc_coul'])
+    
+    if not wolf:
+        F_coul, tau, pe_coul = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list,
+                                                            p['q_o'], p['q_h'],
+                                                            p['k_coul'], p['rc_coul'])
+    elif wolf:
+        F_coul, tau, pe_coul = build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list,
+                                                            p['q_o'], p['q_h'],
+                                                            p['k_coul'], p['rc_coul'], p['alpha'])
     return F_lj + F_coul, tau, pe_lj + pe_coul

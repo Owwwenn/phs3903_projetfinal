@@ -123,7 +123,7 @@ def world_to_body(quats, v_world):
 #  Full Velocity Verlet step (translation + rotation)
 # ─────────────────────────────────────────────
 def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
-                          I_body, L_box, p, dt, nbr_list, xi_t = 0, xi_r = 0, s_t = 0, s_r = 0, n_mol = 0, T = 0):
+                          I_body, L_box, p, dt, nbr_list, xi_t = 0, xi_r = 0, s_t = 0, s_r = 0, n_mol = 0, T = 0, wolf=False):
 
     # --- 1. UPDATENHCP premier demi-pas ---
     xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
@@ -143,7 +143,7 @@ def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
     quats = full_step_quat(quats, L_body, I_body, dt)
 
     # --- 6. Recompute forces and torques ---
-    forces, tau, pe = compute_forces_and_torques(len(cm_pos), cm_pos, quats, L_box, nbr_list, p)
+    forces, tau, pe = compute_forces_and_torques(len(cm_pos), cm_pos, quats, L_box, nbr_list, p, wolf)
 
     # --- 7. Second half-step rotation ---
     tau_body = world_to_body(quats, tau)

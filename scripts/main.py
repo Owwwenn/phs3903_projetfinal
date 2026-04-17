@@ -16,15 +16,18 @@ from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 #  Simulation parameters
 # ─────────────────────────────────────────────
 N        = 216
-rho      = 0.0334        # molecules/Å³
-T_K      = 300.0
+# rho      = 0.0334        # molecules/Å³
+rho      = 2e-3        # molecules/Å³
+# T_K      = 300.0
 dt_fs    = 1.0          # fs  — smaller dt needed with Coulomb
-nl_freq  = 20
-snap_freq = 10
+nl_freq  = 10
+snap_freq = 100
 xi_t, xi_r = 0.0, 0.0
 s_t,  s_r  = 0.0, 0.0
 dt = (dt_fs * 1e-3) / T_UNIT_PS
 
+_wolf = True
+_phase = 'gas'
 
 T_start = 300.0
 T_end   = 600
@@ -38,14 +41,14 @@ n_steps = n_equil + n_ramp + n_prod
 r_h1, r_h2 = get_site_offsets(SPCE['theta'], SPCE['r_oh'])
 p = {**SPCE, 'r_h1': r_h1, 'r_h2': r_h2}
 
-cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_K, p)
+cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_start, p, seed=42, phase=_phase)
 
 L_box_new = np.array([L_box[0], L_box[1], L_box[2] * 5.0])
 cm_pos[:, 2] += 2 * L_box[2]  # ← 2x pour centrer dans une boite 5x
 L_box = L_box_new
 
 nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
-forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p)
+forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p, _wolf)
 
 ke_t0 = kinetic_energy_trans(cm_vel, p['mass'])
 ke_r0 = kinetic_energy_rot(L_body, p['I_body'])
@@ -88,14 +91,12 @@ for step in range(n_steps):
     if step % nl_freq == 0:
         nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 
-<<<<<<< HEAD
-
-
     cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r = velocity_verlet_step(
         cm_pos, cm_vel, quats, L_body, forces, tau,
         p['mass'], p['I_body'], L_box, p, dt, nbr_list,
         xi_t=xi_t, xi_r=xi_r, s_t=s_t, s_r=s_r,
-        n_mol=N, T=T_K
+        n_mol=N, T=T_K,
+        wolf=_wolf
     )
 
     ke_t = kinetic_energy_trans(cm_vel, p['mass'])

@@ -9,7 +9,7 @@ SPCE = dict(
     sigma    = 3.1656,       # Å         O-O LJ
     mass     = 18.015,       # amu
     rc_LJ    = 9.0,          # Å  LJ cutoff
-    rc_coul  = 10,          # Å  Coulomb cutoff
+    rc_coul  = 15,          # Å  Coulomb cutoff
     q_o      = -0.8476,      # e
     q_h      =  0.4238,      # e
     r_oh     =  1.0,         # Å  O-H bond
@@ -18,6 +18,7 @@ SPCE = dict(
     I_body   = np.array([1.3743, 1.9144, 0.6001]),
     # Coulomb prefactor in kcal/mol units: k_e * e² in kcal·Å/mol
     k_coul   = 332.0637,
+    alpha = 3/15            # Supposé être environ 3/rc_coul
 )
 
 kB        = 0.001987   # kcal/(mol·K)
