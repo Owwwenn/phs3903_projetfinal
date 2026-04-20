@@ -17,9 +17,9 @@ from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 # ─────────────────────────────────────────────
 N        = 216
 rho      = 0.0334
-rho_target = 0.00002        # molecules/Å³
+rho_target = 0.002        # molecules/Å³
 T_K      = 300.0
-dt_fs    = 1.0          # fs  — smaller dt needed with Coulomb
+dt_fs    = 1        # fs  — smaller dt needed with Coulomb
 nl_freq  = 20
 snap_freq = 10
 xi_t, xi_r = 0.0, 0.0
@@ -30,8 +30,8 @@ dt = (dt_fs * 1e-3) / T_UNIT_PS
 T_start = 300.0
 T_end   = 700
 n_equil = 100    # steps à 300K pour équilibrer d'abord
-n_ramp  = 10000  # steps pour monter de 300 → 500K
-n_prod  = 100000    # steps à 500K
+n_ramp  = 1000  # steps pour monter de 300 → 500K
+n_prod  = 10000    # steps à 500K
 
 n_steps = n_equil + n_ramp + n_prod
 
@@ -41,14 +41,14 @@ p = {**SPCE, 'r_h1': r_h1, 'r_h2': r_h2}
 
 cm_pos, cm_vel, quats, L_body, L_box = make_initial_state(N, rho, T_K, p)
 
-# L_box_new = np.array([L_box[0], L_box[1], L_box[2] * 5.0])
-# cm_pos[:, 2] += 2 * L_box[2]  # ← 2x pour centrer dans une boite 5x
-# L_box = L_box_new
-
-z = rho / rho_target                     # volume scale factor
-L_box_new = np.array([L_box[0], L_box[1], L_box[2] * z])
-cm_pos[:, 2] += (z / 2) * L_box[2]      # centre dans la boite étendue
+L_box_new = np.array([L_box[0], L_box[1], L_box[2] * 5.0])
+cm_pos[:, 2] += 2 * L_box[2]  # ← 2x pour centrer dans une boite 5x
 L_box = L_box_new
+
+# z = rho / rho_target                     # volume scale factor
+# L_box_new = np.array([L_box[0], L_box[1], L_box[2] * z])
+# cm_pos[:, 2] += (z / 2) * L_box[2]      # centre dans la boite étendue
+# L_box = L_box_new
 
 nbr_list = build_neighbour_list(cm_pos, L_box, max(p['rc_LJ'], p['rc_coul']))
 forces, tau, pe = compute_forces_and_torques(N, cm_pos, quats, L_box, nbr_list, p)
