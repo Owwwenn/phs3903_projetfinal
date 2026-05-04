@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from md_sim.core.system import get_site_offsets 
 from md_sim.core.system import make_initial_state
-from md_sim.core.potential_force.coul_LJ import compute_forces_and_torques
+from md_sim.core.potential_force.coul_LJ_opt import compute_forces_and_torques
 from md_sim.core.system import get_atom_positions
 from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list, build_neighbour_list_kdtree, build_neighbour_list_numba
 from md_sim.core.system import SPCE
