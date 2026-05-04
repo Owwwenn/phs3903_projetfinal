@@ -8,17 +8,21 @@ SPCE = dict(
     epsilon  = 0.1553,       # kcal/mol  O-O LJ
     sigma    = 3.1656,       # Å         O-O LJ
     mass     = 18.015,       # amu
-    rc_LJ    = 9.0,          # Å  LJ cutoff
-    rc_coul  = 15,          # Å  Coulomb cutoff
+    rc_LJ    = 8.5,          # Å  LJ cutoff
+    rc_coul  = 9.0,          # Å  Coulomb cutoff
     q_o      = -0.8476,      # e
     q_h      =  0.4238,      # e
     r_oh     =  1.0,         # Å  O-H bond
     theta    =  np.radians(109.47),   # H-O-H angle
-    # SPC/E moments of inertia [amu·Å²]
-    I_body   = np.array([1.3743, 1.9144, 0.6001]),
+    # SPC/E moments of inertia [amu·Å²] 
+    I_body   = np.array([1.9407, 0.5968, 1.3439]),
     # Coulomb prefactor in kcal/mol units: k_e * e² in kcal·Å/mol
     k_coul   = 332.0637,
-    alpha = 3/15            # Supposé être environ 3/rc_coul
+    alpha = 3.5/9,            # Supposé être environ 3/rc_coul
+    frac_core = 0.2,
+    rho_liq = 0.0334,
+    r_min_gas = 2.0,
+    kmax = 6
 )
 
 kB        = 0.001987   # kcal/(mol·K)
@@ -101,6 +105,79 @@ def make_initial_state(N, rho, T_K, p, seed=42, phase='liquid'):
                 f"Could only place {placed}/{N} molecules without overlap. "
                 f"Try decreasing r_min_gas (currently {r_min} Å) or rho."
             )
+    elif phase == 'coeur':
+        # fraction de molécules dans le coeur liquide
+        frac_core = p.get('frac_core', 0.2)
+        N_core = int(frac_core * N)
+        N_gas  = N - N_core
+
+        # rayon du coeur (approx sphère compacte)
+        rho_liq = p.get('rho_liq', 0.033)  # ~ eau liquide en mol/Å^3
+        V_core  = N_core / rho_liq
+        R_core  = (3 * V_core / (4*np.pi)) ** (1/3)
+
+        center = L[0] / 2.0
+
+        # ── Coeur liquide (lattice dans sphère) ────────────────
+        n_side  = int(np.ceil((N_core * 2) ** (1/3)))  # ← densifie la grille
+        spacing = (2*R_core) / n_side
+
+        idx = np.array([[i, j, k]
+                        for i in range(n_side)
+                        for j in range(n_side)
+                        for k in range(n_side)])
+
+        pos_core = []
+        for triplet in idx:
+            pos = triplet * spacing + (center - R_core)
+            if np.linalg.norm(pos - center) <= R_core:
+                pos_core.append(pos)
+
+        # ── FIX: forcer exactement N_core ──────────────────────
+        if len(pos_core) < N_core:
+            raise RuntimeError(
+                f"Core underfilled: {len(pos_core)}/{N_core}. Increase grid density."
+            )
+
+        pos_core = np.array(pos_core[:N_core])
+
+        # ── Gaz autour ─────────────────────────────────────────
+        r_min   = p.get('r_min_gas', 2.5)
+        pos_gas = np.zeros((N_gas, 3))
+
+        placed  = 0
+        tries   = 0
+        max_try = 200_000
+
+        while placed < N_gas and tries < max_try:
+            candidate = np.random.uniform(0, L[0], size=3)
+
+            # distance au centre (évite le coeur)
+            if np.linalg.norm(candidate - center) < R_core:
+                tries += 1
+                continue
+
+            if placed == 0:
+                pos_gas[0] = candidate
+                placed += 1
+            else:
+                diffs = candidate - pos_gas[:placed]
+                diffs -= L[0] * np.round(diffs / L[0])
+                dists = np.linalg.norm(diffs, axis=1)
+
+                if dists.min() >= r_min:
+                    pos_gas[placed] = candidate
+                    placed += 1
+
+            tries += 1
+
+        if placed < N_gas:
+            raise RuntimeError(
+                f"Could only place {placed}/{N_gas} gas molecules. "
+                f"Try decreasing r_min_gas or frac_core."
+            )
+
+        cm_pos = np.vstack([pos_core, pos_gas])
 
     # ── Translational velocities — Maxwell-Boltzmann ───────
     cm_vel  = np.random.randn(N, 3)

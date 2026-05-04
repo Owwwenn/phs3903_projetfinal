@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.spatial.transform import Rotation
 from md_sim.core.system import SPCE
 from md_sim.core.potential_force.coul_LJ_opt import compute_forces_and_torques
+from md_sim.core.nose_hoover.barostat import pr_barostat_isotropic, semi_isotropic_barostat_z
 from md_sim.core.system import kB
 
 # ─────────────────────────────────────────────
@@ -27,8 +27,9 @@ def axis_angle_to_quat(axis, angles):
 
 def nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt):
     I1, I2, I3 = SPCE['I_body']
-    q_t = (3*n_mol - 3) * kB * T / (50**2)
-    q_r = 3*n_mol * kB * T / (50**2)
+    tau_NH = 2.0   # t* ≈ 0.098 ps — période thermostat ~0.6 ps, standard pour SPC/E
+    q_t = (3*n_mol - 3) * kB * T * tau_NH**2
+    q_r = 3*n_mol * kB * T * tau_NH**2
     
     KE_t = 0.5 * np.sum(mass * np.sum(cm_vel**2, axis=1))
     KE_r = 0.5 * np.sum(L_body**2 / np.array([I1, I2, I3]))
@@ -115,18 +116,25 @@ def full_step_quat(quats, L_body, I_body, dt):
     return q
 
 def world_to_body(quats, v_world):
-    """Rotate world-frame vectors to body frame using inverse quaternion."""
-    R = Rotation.from_quat(quats[:, [1,2,3,0]])
-    return R.inv().apply(v_world)
+    """Rotate world-frame vectors to body frame (R^T × v, pure NumPy)."""
+    w = quats[:, 0]; x = quats[:, 1]; y = quats[:, 2]; z = quats[:, 3]
+    vx = v_world[:, 0]; vy = v_world[:, 1]; vz = v_world[:, 2]
+    w2 = w*w; x2 = x*x; y2 = y*y; z2 = z*z
+    bx = vx*(w2+x2-y2-z2) + vy*2*(x*y+w*z) + vz*2*(x*z-w*y)
+    by = vx*2*(x*y-w*z)   + vy*(w2-x2+y2-z2) + vz*2*(y*z+w*x)
+    bz = vx*2*(x*z+w*y)   + vy*2*(y*z-w*x)   + vz*(w2-x2-y2+z2)
+    return np.stack([bx, by, bz], axis=1)
 
 # ─────────────────────────────────────────────
 #  Full Velocity Verlet step (translation + rotation)
 # ─────────────────────────────────────────────
 def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
-                          I_body, L_box, p, dt, nbr_list, xi_t = 0, xi_r = 0, s_t = 0, s_r = 0, n_mol = 0, T = 0, wolf=False):
+                          I_body, L_box, p, dt, nbr_list, xi_t=0, xi_r=0, s_t=0, s_r=0,
+                          n_mol=0, T=0, mode='normal', virial=0.0, virial_zz=0.0,
+                          eta_p=0.0, Q_p=1.0, P0=1.0, barostat='semi_z'):
 
     # --- 1. UPDATENHCP premier demi-pas ---
-    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
+    # xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
 
     # --- 2. Half-step translations ---
     cm_vel = np.exp(-0.5 * dt * xi_t) * cm_vel
@@ -143,7 +151,22 @@ def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
     quats = full_step_quat(quats, L_body, I_body, dt)
 
     # --- 6. Recompute forces and torques ---
-    forces, tau, pe = compute_forces_and_torques(len(cm_pos), cm_pos, quats, L_box, nbr_list, p, wolf)
+    forces, tau, pe, virial, virial_zz = compute_forces_and_torques(len(cm_pos), cm_pos, quats, L_box, nbr_list, p, mode)
+
+    # --- 6.5 BAROSTAT ----
+    if barostat == 'semi_z':
+        L_box, cm_pos, cm_vel, Pzz = semi_isotropic_barostat_z(
+            L_box, cm_pos, cm_vel,
+            virial_zz, n_mol, T, P0, dt, Q_p
+        )
+        eta_p = Pzz  # reuse slot to return Pzz for display
+    elif barostat == 'isotropic':
+        L_box, cm_pos, cm_vel, eta_p = pr_barostat_isotropic(
+            L_box, cm_pos, cm_vel,
+            virial, n_mol, T,
+            eta_p, Q_p, P0, dt
+        )
+    # barostat == 'none': no scaling
 
     # --- 7. Second half-step rotation ---
     tau_body = world_to_body(quats, tau)
@@ -154,7 +177,7 @@ def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
     cm_vel += 0.5 * dt * forces / mass
 
     # --- 9. UPDATENHCP deuxième demi-pas ---
-    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r,
-                                       cm_vel, L_body, n_mol, mass, T, dt)
+    # xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r,
+    #                                    cm_vel, L_body, n_mol, mass, T, dt)
 
-    return cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r
+    return cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r, virial, virial_zz, eta_p, L_box

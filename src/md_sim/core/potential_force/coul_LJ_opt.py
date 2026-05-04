@@ -2,6 +2,7 @@ import numpy as np
 from numba import njit
 from scipy.special import erfc
 from md_sim.core.system import get_atom_positions
+from md_sim.core.potential_force.ewald import build_coulomb_forces_torques_ewald
 
 # ─────────────────────────────────────────────
 #  LJ forces  (O-O only)
@@ -9,45 +10,71 @@ from md_sim.core.system import get_atom_positions
 
 @njit(cache=True, fastmath=True)
 def _lj_kernel(pos, i_idx, j_idx, L, epsilon, sigma, rc):
-    """Numba JIT kernel for LJ forces — compiled once, cached to disk."""
     n_pairs = len(i_idx)
     n_atoms = pos.shape[0]
-    forces  = np.zeros((n_atoms, 3))
-    pe      = 0.0
 
-    rc2    = rc * rc
-    rc6    = (sigma * sigma / rc2) ** 3
+    forces    = np.zeros((n_atoms, 3))
+    pe        = 0.0
+    virial    = 0.0
+    virial_zz = 0.0
+
+    rc2  = rc * rc
+    sig2 = sigma * sigma
+
+    # energy shift
+    rc6    = (sig2 / rc2) ** 3
     Eshift = 4.0 * epsilon * (rc6 * rc6 - rc6)
-    sig2   = sigma * sigma
 
     for k in range(n_pairs):
-        i, j = i_idx[k], j_idx[k]
+        i = i_idx[k]
+        j = j_idx[k]
+
         dx = pos[j, 0] - pos[i, 0]
         dy = pos[j, 1] - pos[i, 1]
         dz = pos[j, 2] - pos[i, 2]
+
         # MIC
         dx -= L[0] * np.rint(dx / L[0])
         dy -= L[1] * np.rint(dy / L[1])
         dz -= L[2] * np.rint(dz / L[2])
+
         r2 = dx*dx + dy*dy + dz*dz
         if r2 >= rc2:
             continue
+
         r2i  = sig2 / r2
         r6i  = r2i * r2i * r2i
         r12i = r6i * r6i
-        pe  += 4.0 * epsilon * (r12i - r6i) - Eshift
+
+        # energy
+        pe += 4.0 * epsilon * (r12i - r6i) - Eshift
+
+        # force
         fmag = 48.0 * epsilon * r2i * (r12i - 0.5 * r6i)
-        fx, fy, fz = fmag * dx, fmag * dy, fmag * dz
-        forces[i, 0] -= fx;  forces[i, 1] -= fy;  forces[i, 2] -= fz
-        forces[j, 0] += fx;  forces[j, 1] += fy;  forces[j, 2] += fz
 
-    return forces, pe
+        fx = fmag * dx
+        fy = fmag * dy
+        fz = fmag * dz
 
+        # accumulate forces
+        forces[i, 0] -= fx
+        forces[i, 1] -= fy
+        forces[i, 2] -= fz
+
+        forces[j, 0] += fx
+        forces[j, 1] += fy
+        forces[j, 2] += fz
+
+        # virial
+        virial    += dx*fx + dy*fy + dz*fz
+        virial_zz += dz*fz
+
+    return forces, pe, virial, virial_zz
 
 def build_lj_forces(n, pos, L, nbr_list, epsilon, sigma, rc):
     i_idx, j_idx = nbr_list
-    return _lj_kernel(pos, i_idx, j_idx, L, epsilon, sigma, rc)
-
+    forces, pe, virial, virial_zz = _lj_kernel(pos, i_idx, j_idx, L, epsilon, sigma, rc)
+    return forces, pe, virial, virial_zz
 
 # ─────────────────────────────────────────────
 #  Coulomb forces + torques — fully vectorised
@@ -116,7 +143,9 @@ def build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc
     fmag = np.where(mask, -qq / r3, 0.0)    # (9, N)  zero outside cutoff
 
     # ── Force vectors ─────────────────────────────────────────────────────────
-    f_vec = fmag[:, :, None] * dr            # (9, N, 3)
+    f_vec     = fmag[:, :, None] * dr        # (9, N, 3)
+    virial    = np.sum(dr * f_vec)
+    virial_zz = np.sum(dr[:, :, 2] * f_vec[:, :, 2])
 
     # ── Lever arms from COM (= O position) ───────────────────────────────────
     # levers_i[s] = site_s_position[i_idx] - O[i_idx]
@@ -145,7 +174,7 @@ def build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc
     np.add.at(tau,    i_idx, ti_sum)
     np.add.at(tau,    j_idx, tj_sum)
 
-    return F_coul, tau, pe_coul
+    return F_coul, tau, pe_coul, virial, virial_zz
 
 def build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list, q_o, q_h, k_coul, rc_coul, alpha):
     """
@@ -209,7 +238,9 @@ def build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list, q_o, q_h, k_cou
         0.0
     )
 
-    f_vec = fmag[:, :, None] * dr
+    f_vec     = fmag[:, :, None] * dr
+    virial    = np.sum(dr * f_vec)
+    virial_zz = np.sum(dr[:, :, 2] * f_vec[:, :, 2])
 
     levers_i = sites_i - sites_i[0:1]
     levers_j = sites_j - sites_j[0:1]
@@ -233,24 +264,31 @@ def build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list, q_o, q_h, k_cou
     np.add.at(tau,    i_idx, ti_sum)
     np.add.at(tau,    j_idx, tj_sum)
 
-    return F_coul, tau, pe_coul
+    return F_coul, tau, pe_coul, virial, virial_zz
 
 # ─────────────────────────────────────────────
 #  Combined force/torque
 # ─────────────────────────────────────────────
 
-def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p, wolf=False):
+def compute_forces_and_torques(n, cm_pos, quats, L, nbr_list, p, mode='normal'):
     O, H1, H2 = get_atom_positions(cm_pos, quats, p['r_h1'], p['r_h2'])
+    nbr_list_LJ, nbr_list_coul = nbr_list
 
-    F_lj,   pe_lj   = build_lj_forces(n, cm_pos, L, nbr_list,
+    F_lj, pe_lj, virial_LJ, virial_LJ_zz = build_lj_forces(n, cm_pos, L, nbr_list_LJ,
                                         p['epsilon'], p['sigma'], p['rc_LJ'])
-    
-    if not wolf:
-        F_coul, tau, pe_coul = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list,
-                                                            p['q_o'], p['q_h'],
-                                                            p['k_coul'], p['rc_coul'])
-    elif wolf:
-        F_coul, tau, pe_coul = build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list,
+
+    if mode == 'ewald':
+        F_coul, tau, pe_coul, virial_coul, virial_coul_zz = build_coulomb_forces_torques_ewald(
+            n, O, H1, H2, L, nbr_list_coul,
+            p['q_o'], p['q_h'], p['k_coul'], p['rc_coul'],
+            p['alpha'], p.get('kmax', 6)
+        )
+    elif mode == 'wolf':
+        F_coul, tau, pe_coul, virial_coul, virial_coul_zz = build_coulomb_forces_torques_wolf(n, O, H1, H2, L, nbr_list_coul,
                                                             p['q_o'], p['q_h'],
                                                             p['k_coul'], p['rc_coul'], p['alpha'])
-    return F_lj + F_coul, tau, pe_lj + pe_coul
+    elif mode == 'normal':
+        F_coul, tau, pe_coul, virial_coul, virial_coul_zz = build_coulomb_forces_torques(n, O, H1, H2, L, nbr_list_coul,
+                                                            p['q_o'], p['q_h'],
+                                                            p['k_coul'], p['rc_coul'])
+    return F_lj + F_coul, tau, pe_lj + pe_coul, virial_LJ + virial_coul, virial_LJ_zz + virial_coul_zz
