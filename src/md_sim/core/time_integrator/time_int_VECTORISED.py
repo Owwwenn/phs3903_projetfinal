@@ -134,7 +134,7 @@ def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
                           eta_p=0.0, Q_p=1.0, P0=1.0, barostat='semi_z'):
 
     # --- 1. UPDATENHCP premier demi-pas ---
-    # xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
+    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r, cm_vel, L_body, n_mol, mass, T, dt)
 
     # --- 2. Half-step translations ---
     cm_vel = np.exp(-0.5 * dt * xi_t) * cm_vel
@@ -177,7 +177,7 @@ def velocity_verlet_step(cm_pos, cm_vel, quats, L_body, forces, tau, mass,
     cm_vel += 0.5 * dt * forces / mass
 
     # --- 9. UPDATENHCP deuxième demi-pas ---
-    # xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r,
-    #                                    cm_vel, L_body, n_mol, mass, T, dt)
+    xi_t, xi_r, s_t, s_r = nh_update(xi_t, xi_r, s_t, s_r,
+                                       cm_vel, L_body, n_mol, mass, T, dt)
 
     return cm_pos, cm_vel, quats, L_body, forces, tau, pe, xi_t, xi_r, s_t, s_r, virial, virial_zz, eta_p, L_box

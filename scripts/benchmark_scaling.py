@@ -20,6 +20,7 @@ Figures produites (une par fichier) :
   fig6_pct_both.png         — % par étape côte à côte (liquide & gaz), N_ref
   fig7_cpu.png              — CPU moyen vs N
   fig8_ram.png              — RAM pic vs N
+  fig9_vv_temps.png         — temps Verlet + Forces seul vs N
 """
 
 import sys, os
@@ -38,7 +39,7 @@ from md_sim.core.system import (
     get_site_offsets, make_initial_state, SPCE, T_UNIT_PS
 )
 from md_sim.core.potential_force.coul_LJ_opt import compute_forces_and_torques
-from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list_numba as build_neighbour_list
+from md_sim.core.neighbour_list.neighbour_list import build_neighbour_list
 from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 from md_sim.caracterisation.energy import kinetic_energy_trans, kinetic_energy_rot
 
@@ -484,6 +485,21 @@ for phase, color, label in PHASE_STYLE:
 ax.set(xlabel='N (molécules)', ylabel='RAM pic (Mo)')
 leg(ax)
 savefig(fig, os.path.join(results_dir, 'fig8_ram.png'))
+
+# ─────────────────────────────────────────────────────────────
+#  Fig 9 — Temps Verlet + Forces vs N
+# ─────────────────────────────────────────────────────────────
+fig, ax = new_fig(f'Temps Verlet + Forces / step vs N  (mode={MODE})', w=8, h=5)
+for phase, color, label in PHASE_STYLE:
+    Ns, means = serie(phase, ['stats', 'vv', 'mean'])
+    _, stds   = serie(phase, ['stats', 'vv', 'std'])
+    means_ms  = [v * 1000 for v in means]
+    stds_ms   = [v * 1000 for v in stds]
+    ax.errorbar(Ns, means_ms, yerr=stds_ms,
+                marker='o', color=color, label=label, lw=2, capsize=5)
+ax.set(xlabel='N (molécules)', ylabel='Temps (ms)')
+leg(ax)
+savefig(fig, os.path.join(results_dir, 'fig9_vv_temps.png'))
 
 # ─────────────────────────────────────────────────────────────
 #  Tableau récapitulatif

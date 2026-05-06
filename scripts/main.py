@@ -17,7 +17,7 @@ from md_sim.core.time_integrator.time_int_VECTORISED import velocity_verlet_step
 # ─────────────────────────────────────────────
 #  Simulation parameters
 # ─────────────────────────────────────────────
-run_label = "30012005k5k5kUDv3"   # ← changer ce nom pour identifier la run
+run_label = "30012007p5k7p5k7p5kUD"   # ← changer ce nom pour identifier la run
 
 N        = 256
 rho      = 0.0334        # molecules/Å³
@@ -43,9 +43,9 @@ _phase = 'liquid'   # interface pré-formée → barrière de nucléation rédui
 kB_kcal = 0.001987
 T_start = 300
 T_end   = 1200      # SPC/E Tb ~400-450 K; 700K suffit pour observer la vaporisation
-n_equil = 5000     # équilibration plus longue pour former l'interface
-n_ramp  = 5000    # rampe lente (~20 ps) pour donner le temps d'évaporer
-n_prod  = 5000    # production à T_end
+n_equil = 7500     # équilibration plus longue pour former l'interface
+n_ramp  = 7500    # rampe lente (~20 ps) pour donner le temps d'évaporer
+n_prod  = 7500    # production à T_end
 
 T_K_list = np.concatenate([
     T_start * np.ones(n_equil),           # équilibration liquide
@@ -147,7 +147,7 @@ for step in range(n_steps):
 
     print(f"{step:>7}  {te/N:>10.4f}  {pe/N:>10.4f}  "
             f"{ke_t/N:>10.4f}  {ke_r/N:>10.4f}  {dE_arr[step]:>10.2e}  "
-            f"Pzz={Pzz_atm:8.1f} atm  Lz={L_box[2]:7.2f} Å")
+            f"Pzz={Pzz_atm:8.1f} atm  Lz={L_box[2]:7.2f} Å T = {T_inst}K")
     if step in checkpoint_steps:
         rho_z_ck, _ = np.histogram(cm_pos[:, 2], bins=100, range=(0, L_box[2]))
         rho_z_ck = rho_z_ck / (L_box[0] * L_box[1] * dz)
